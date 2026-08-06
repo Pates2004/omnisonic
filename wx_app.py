@@ -278,6 +278,10 @@ class DownloadDialog(wx.Dialog):
             self.cancel_flag = True
             self.timer.Stop()
             self.EndModal(wx.ID_CANCEL)
+        else:
+            import wx
+            if isinstance(event, wx.CloseEvent):
+                event.Veto()
 
     def _dl_worker(self):
         try:
