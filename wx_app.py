@@ -924,7 +924,12 @@ class OmniVoiceFrame(wx.Frame):
         try:
             device = get_best_device()
             if op_dialog.cancel_flag: return
-            self.model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", device_map=device, dtype=torch.float16, load_asr=True)
+            
+            asr_name = self.cfg.get("asr_model_name", "")
+            kwargs = {"device_map": device, "dtype": torch.float16, "load_asr": True}
+            if asr_name: kwargs["asr_model_name"] = asr_name
+            self.model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", **kwargs)
+
             if op_dialog.cancel_flag: 
                 self.model = None
         except Exception as e:
@@ -957,6 +962,8 @@ class OmniVoiceFrame(wx.Frame):
         preset_idx = self.combo_presets.GetSelection()
         preset = self.combo_presets.GetClientData(preset_idx) if preset_idx != wx.NOT_FOUND else None
         speed = self.spin_speed.GetValue()
+        duration = self.spin_duration.GetValue() if self.chk_duration.GetValue() else None
+        norm_txt = self.cfg.get("normalize_text", False)
         
         if not text:
             return
@@ -987,9 +994,74 @@ class OmniVoiceFrame(wx.Frame):
                 prompt = self.model.create_voice_clone_prompt(ref_audio=ref_audio, ref_text=ref_text)
                 
             if op_dialog.cancel_flag: return
-            audio = self.model.generate(text=text, language=lang, speed=speed, generation_config=gen_config, voice_clone_prompt=prompt)
+            kwargs = {"text": text, "generation_config": gen_config, "voice_clone_prompt": prompt, "normalize_text": norm_txt}
+            if lang: kwargs["language"] = lang
+            if duration: kwargs["duration"] = duration
+            else: kwargs["speed"] = speed
+            audio = self.model.generate(**kwargs)
             if op_dialog.cancel_flag: return
             
+            self.audio_data = audio[0]
+        except Exception as e:
+            if not op_dialog.cancel_flag:
+                wx.CallAfter(self.Log, self._("msg_error") + str(e))
+
+
+    def SetupAutoTab(self, tab):
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        
+        wx.StaticText(tab, label="Tekst:")
+        self.auto_text = wx.TextCtrl(tab, style=wx.TE_MULTILINE)
+        vbox.Add(self.auto_text, 1, wx.EXPAND | wx.ALL, 5)
+        
+        hbox = wx.BoxSizer(wx.HORIZONTAL)
+        wx.StaticText(tab, label="Język / Language:")
+        self.auto_lang = wx.ComboBox(tab, choices=_ALL_LANGUAGES, style=wx.CB_READONLY)
+        self.auto_lang.SetSelection(0)
+        hbox.Add(self.auto_lang, 0, wx.RIGHT, 10)
+        
+        self.btn_gen_auto = wx.Button(tab, label="Generuj (Losowy głos)")
+        self.btn_gen_auto.Bind(wx.EVT_BUTTON, self.OnGenAuto)
+        hbox.Add(self.btn_gen_auto, 0, wx.ALL, 0)
+        
+        vbox.Add(hbox, 0, wx.EXPAND | wx.ALL, 5)
+        tab.SetSizer(vbox)
+
+    def OnGenAuto(self, event):
+        if not self.model:
+            wx.MessageBox(self._("msg_load_first"), self._("error_title"))
+            return
+        text = self.auto_text.GetValue().strip()
+        lang = self.auto_lang.GetValue()
+        if lang == "Auto": lang = None
+        speed = self.spin_speed.GetValue()
+        duration = self.spin_duration.GetValue() if self.chk_duration.GetValue() else None
+        norm_txt = self.cfg.get("normalize_text", False)
+        duration = self.spin_duration.GetValue() if self.chk_duration.GetValue() else None
+        norm_txt = self.cfg.get("normalize_text", False)
+        if not text: return
+            
+        def on_success():
+            if self.audio_data is not None:
+                self.Log(self._("ready"), success=True)
+                self.btn_play.Enable()
+                self.btn_save.Enable()
+                self.btn_play.SetFocus()
+                wx.Bell()
+                
+        self.RunOperation("Generowanie", "Trwa generowanie losowego głosu...", self._GenAutoWorker, text, lang, speed, duration, norm_txt, success_callback=on_success)
+
+    def _GenAutoWorker(self, op_dialog, text, lang, speed, duration, norm_txt):
+        try:
+            gen_config = self.GetGenConfig()
+            if op_dialog.cancel_flag: return
+            kwargs = {"text": text, "generation_config": gen_config, "normalize_text": norm_txt}
+            if lang: kwargs["language"] = lang
+            if duration: kwargs["duration"] = duration
+            else: kwargs["speed"] = speed
+            
+            audio = self.model.generate(**kwargs)
+            if op_dialog.cancel_flag: return
             self.audio_data = audio[0]
         except Exception as e:
             if not op_dialog.cancel_flag:
@@ -1001,6 +1073,8 @@ class OmniVoiceFrame(wx.Frame):
         lang = self.design_lang.GetValue()
         if lang == "Auto": lang = None
         speed = self.spin_speed.GetValue()
+        duration = self.spin_duration.GetValue() if self.chk_duration.GetValue() else None
+        norm_txt = self.cfg.get("normalize_text", False)
         if not text: return
             
         instructs = []
@@ -1021,13 +1095,17 @@ class OmniVoiceFrame(wx.Frame):
                 self.btn_play.SetFocus()
                 wx.Bell()
                 
-        self.RunOperation("op_gen_title", "op_gen_msg", self._GenDesignWorker, text, lang, instruct, speed, success_callback=on_success)
+        self.RunOperation("op_gen_title", "op_gen_msg", self._GenDesignWorker, text, lang, instruct, speed, duration, norm_txt, success_callback=on_success)
 
-    def _GenDesignWorker(self, op_dialog, text, lang, instruct, speed):
+    def _GenDesignWorker(self, op_dialog, text, lang, instruct, speed, duration, norm_txt):
         try:
             gen_config = self.GetGenConfig()
             if op_dialog.cancel_flag: return
-            audio = self.model.generate(text=text, language=lang, speed=speed, instruct=instruct, generation_config=gen_config)
+            kwargs = {"text": text, "instruct": instruct, "generation_config": gen_config, "normalize_text": norm_txt}
+            if lang: kwargs["language"] = lang
+            if duration: kwargs["duration"] = duration
+            else: kwargs["speed"] = speed
+            audio = self.model.generate(**kwargs)
             if op_dialog.cancel_flag: return
             
             self.audio_data = audio[0]
@@ -1137,6 +1215,31 @@ class OmniVoiceFrame(wx.Frame):
                 path_ctrl.SetValue(path)
                 wx.Bell()
 
+
+
+    def OnShowTags(self, event):
+        msg = """Dostępne specjalne tagi do wpisania w treść tekstu:
+
+Emocje / dźwięki:
+[laughter] - Śmiech
+[sigh] - Westchnienie
+
+Wykrzyknienia / pytania (najlepiej działają z ang):
+[confirmation-en] - Potwierdzenie
+[question-en] - Pytanie ogólne
+[question-ah] - Zdziwienie (Ah?)
+[question-oh] - Zdziwienie (Oh?)
+[question-ei] - Zdziwienie (Ei?)
+[question-yi] - Zdziwienie (Yi?)
+[surprise-ah] - Niespodzianka (Ah!)
+[surprise-oh] - Niespodzianka (Oh!)
+[surprise-wa] - Niespodzianka (Wa!)
+[surprise-yo] - Niespodzianka (Yo!)
+[dissatisfaction-hnn] - Niezadowolenie (Hnn...)
+
+CMU Dict (tylko angielski):
+Możesz wpisać fonemy w nawiasach klamrowych, np. [B EY1 S]."""
+        wx.MessageBox(msg, "Dostępne Tagi", wx.OK | wx.ICON_INFORMATION)
 
 def main():
     app = wx.App(False)
