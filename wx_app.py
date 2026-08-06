@@ -18,31 +18,12 @@ get_best_device = None
 
 _ALL_LANGUAGES = ["Auto"]
 
-_CAT_PL = {
-    "PĹ‚eÄ‡": ["Brak", "MÄ™ĹĽczyzna", "Kobieta"],
-    "Wiek": ["Brak", "Dziecko", "Nastolatek", "MĹ‚ody", "W Ĺ›rednim wieku", "Starszy"],
-    "WysokoĹ›Ä‡ gĹ‚osu": ["Brak", "Bardzo niska", "Niska", "Ĺšrednia", "Wysoka", "Bardzo wysoka"],
-    "Styl": ["Brak", "Szept"],
-    "Akcent": ["Brak", "AmerykaĹ„ski", "Australijski", "Brytyjski", "ChiĹ„ski", "Kanadyjski", "Indyjski", "KoreaĹ„ski", "Portugalski", "Rosyjski", "JapoĹ„ski"],
-}
-
-_CAT_EN = {
+_CATEGORIES = {
     "Gender": ["None", "Male", "Female"],
     "Age": ["None", "Child", "Teenager", "Young Adult", "Middle-aged", "Elderly"],
     "Pitch": ["None", "Very Low Pitch", "Low Pitch", "Moderate Pitch", "High Pitch", "Very High Pitch"],
     "Style": ["None", "Whisper"],
     "Accent": ["None", "American Accent", "Australian Accent", "British Accent", "Chinese Accent", "Canadian Accent", "Indian Accent", "Korean Accent", "Portuguese Accent", "Russian Accent", "Japanese Accent"],
-}
-
-_VAL_MAP = {
-    "Brak": "None", "MÄ™ĹĽczyzna": "Male", "Kobieta": "Female",
-    "Dziecko": "Child", "Nastolatek": "Teenager", "MĹ‚ody": "Young Adult", "W Ĺ›rednim wieku": "Middle-aged", "Starszy": "Elderly",
-    "Bardzo niska": "Very Low Pitch", "Niska": "Low Pitch", "Ĺšrednia": "Moderate Pitch", "Wysoka": "High Pitch", "Bardzo wysoka": "Very High Pitch",
-    "Szept": "Whisper",
-    "AmerykaĹ„ski": "American Accent", "Australijski": "Australian Accent", "Brytyjski": "British Accent",
-    "ChiĹ„ski": "Chinese Accent", "Kanadyjski": "Canadian Accent", "Indyjski": "Indian Accent",
-    "KoreaĹ„ski": "Korean Accent", "Portugalski": "Portuguese Accent", "Rosyjski": "Russian Accent",
-    "JapoĹ„ski": "Japanese Accent"
 }
 
 LANGS_DIR = "langs"
