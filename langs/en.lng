@@ -119,5 +119,9 @@
     "preset_created_msg": "Preset {name} has been successfully created!",
     "delete": "Delete",
     "pause": "Pause",
-    "stop_play": "Stop"
+    "stop_play": "Stop",
+    "resume": "Resume",
+    "notify_sys_lbl": "Show system notification after generation",
+    "notify_pop_lbl": "Show confirmation popup after generation",
+    "gen_success_msg": "Done, file successfully generated!"
 }
