@@ -19,11 +19,11 @@ get_best_device = None
 _ALL_LANGUAGES = ["Auto"]
 
 _CAT_PL = {
-    "Płeć": ["Brak", "Mężczyzna", "Kobieta"],
-    "Wiek": ["Brak", "Dziecko", "Nastolatek", "Młody", "W średnim wieku", "Starszy"],
-    "Wysokość głosu": ["Brak", "Bardzo niska", "Niska", "Średnia", "Wysoka", "Bardzo wysoka"],
+    "PĹ‚eÄ‡": ["Brak", "MÄ™ĹĽczyzna", "Kobieta"],
+    "Wiek": ["Brak", "Dziecko", "Nastolatek", "MĹ‚ody", "W Ĺ›rednim wieku", "Starszy"],
+    "WysokoĹ›Ä‡ gĹ‚osu": ["Brak", "Bardzo niska", "Niska", "Ĺšrednia", "Wysoka", "Bardzo wysoka"],
     "Styl": ["Brak", "Szept"],
-    "Akcent": ["Brak", "Amerykański", "Australijski", "Brytyjski", "Chiński", "Kanadyjski", "Indyjski", "Koreański", "Portugalski", "Rosyjski", "Japoński"],
+    "Akcent": ["Brak", "AmerykaĹ„ski", "Australijski", "Brytyjski", "ChiĹ„ski", "Kanadyjski", "Indyjski", "KoreaĹ„ski", "Portugalski", "Rosyjski", "JapoĹ„ski"],
 }
 
 _CAT_EN = {
@@ -35,14 +35,14 @@ _CAT_EN = {
 }
 
 _VAL_MAP = {
-    "Brak": "None", "Mężczyzna": "Male", "Kobieta": "Female",
-    "Dziecko": "Child", "Nastolatek": "Teenager", "Młody": "Young Adult", "W średnim wieku": "Middle-aged", "Starszy": "Elderly",
-    "Bardzo niska": "Very Low Pitch", "Niska": "Low Pitch", "Średnia": "Moderate Pitch", "Wysoka": "High Pitch", "Bardzo wysoka": "Very High Pitch",
+    "Brak": "None", "MÄ™ĹĽczyzna": "Male", "Kobieta": "Female",
+    "Dziecko": "Child", "Nastolatek": "Teenager", "MĹ‚ody": "Young Adult", "W Ĺ›rednim wieku": "Middle-aged", "Starszy": "Elderly",
+    "Bardzo niska": "Very Low Pitch", "Niska": "Low Pitch", "Ĺšrednia": "Moderate Pitch", "Wysoka": "High Pitch", "Bardzo wysoka": "Very High Pitch",
     "Szept": "Whisper",
-    "Amerykański": "American Accent", "Australijski": "Australian Accent", "Brytyjski": "British Accent",
-    "Chiński": "Chinese Accent", "Kanadyjski": "Canadian Accent", "Indyjski": "Indian Accent",
-    "Koreański": "Korean Accent", "Portugalski": "Portuguese Accent", "Rosyjski": "Russian Accent",
-    "Japoński": "Japanese Accent"
+    "AmerykaĹ„ski": "American Accent", "Australijski": "Australian Accent", "Brytyjski": "British Accent",
+    "ChiĹ„ski": "Chinese Accent", "Kanadyjski": "Canadian Accent", "Indyjski": "Indian Accent",
+    "KoreaĹ„ski": "Korean Accent", "Portugalski": "Portuguese Accent", "Rosyjski": "Russian Accent",
+    "JapoĹ„ski": "Japanese Accent"
 }
 
 LANGS_DIR = "langs"
@@ -97,7 +97,7 @@ class StartupSplash:
         msg = self._("startup_msg")
         
         if use_native:
-            self.dialog = wx.ProgressDialog(title, msg or "ProszÄ™ czekaÄ‡...", maximum=100, parent=self.parent, style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT | wx.PD_SMOOTH)
+            self.dialog = wx.ProgressDialog(title, msg or "ProszĂ„â„˘ czekaĂ„â€ˇ...", maximum=100, parent=self.parent, style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT | wx.PD_SMOOTH)
             threading.Thread(target=self.DoHeavyImports, daemon=True).start()
             while not self.finished:
                 cont, skip = self.dialog.Update(self.dialog.GetValue() + 1 if self.dialog.GetValue() < 100 else 0)
@@ -109,7 +109,7 @@ class StartupSplash:
                         sys.exit(0)
                     else:
                         self.dialog.Destroy()
-                        self.dialog = wx.ProgressDialog(title, msg or "ProszÄ™ czekaÄ‡...", maximum=100, parent=self.parent, style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT | wx.PD_SMOOTH)
+                        self.dialog = wx.ProgressDialog(title, msg or "ProszĂ„â„˘ czekaĂ„â€ˇ...", maximum=100, parent=self.parent, style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT | wx.PD_SMOOTH)
                 wx.MilliSleep(50)
                 wx.GetApp().Yield()
             self.dialog.Destroy()
@@ -758,13 +758,16 @@ class OmniVoiceFrame(wx.Frame):
         self.design_lang.SetValue("Auto")
         vbox.Add(self.design_lang, 0, wx.EXPAND | wx.ALL, 5)
         self.design_combos = []
-        categories = _CAT_PL if self.cfg.get("language", "pl") == "pl" else _CAT_EN
-        for cat, choices in categories.items():
+        for cat, choices in _CATEGORIES.items():
             hbox = wx.BoxSizer(wx.HORIZONTAL)
-            label = wx.StaticText(tab, label=f"{cat}:", size=(150, -1))
-            combo = wx.ComboBox(tab, choices=choices, style=wx.CB_READONLY)
-            combo.SetName(cat)
+            cat_trans = self._("cat_" + cat)
+            label = wx.StaticText(tab, label=f"{cat_trans}:", size=(150, -1))
+            choices_trans = [self._("val_" + c) for c in choices]
+            combo = wx.ComboBox(tab, choices=choices_trans, style=wx.CB_READONLY)
+            combo.SetName(cat_trans)
             combo.SetSelection(0)
+            for i, c in enumerate(choices):
+                combo.SetClientData(i, c)
             hbox.Add(label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
             hbox.Add(combo, 1, wx.EXPAND, 0)
             vbox.Add(hbox, 0, wx.EXPAND | wx.ALL, 5)
@@ -876,7 +879,7 @@ class OmniVoiceFrame(wx.Frame):
                 if torch and torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 self.btn_toggle_model.SetLabel(self._("load_model"))
-                self.Log("Model zwolniony z pamięci RAM / Model unloaded from RAM.", success=True)
+                self.Log("Model zwolniony z pamiÄ™ci RAM / Model unloaded from RAM.", success=True)
                 wx.Bell()
             self.RunOperation("op_unload_title", "op_unload_msg", self._UnloadModelWorker, success_callback=on_success)
 
@@ -964,10 +967,11 @@ class OmniVoiceFrame(wx.Frame):
             
         instructs = []
         for c in self.design_combos:
-            val = c.GetValue()
-            if val != "Brak" and val != "None":
-                eng_val = _VAL_MAP.get(val, val)
-                instructs.append(eng_val)
+            idx = c.GetSelection()
+            if idx != wx.NOT_FOUND:
+                eng_val = c.GetClientData(idx)
+                if eng_val != "None":
+                    instructs.append(eng_val)
                 
         instruct = ", ".join(instructs) if instructs else None
         
@@ -1003,7 +1007,7 @@ class OmniVoiceFrame(wx.Frame):
         name = self.preset_name.GetValue().strip()
         
         if not os.path.exists(ref_audio) or not name:
-            wx.MessageBox("ZĹ‚y plik lub brak nazwy presetu. / Bad file or missing preset name.", self._("error_title"))
+            wx.MessageBox("ZÄąâ€šy plik lub brak nazwy presetu. / Bad file or missing preset name.", self._("error_title"))
             return
             
         def on_success():
@@ -1045,13 +1049,13 @@ class OmniVoiceFrame(wx.Frame):
             with wx.FileDialog(self, self._("save"), wildcard="WAV (*.wav)|*.wav", style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT) as fd:
                 if fd.ShowModal() != wx.ID_CANCEL:
                     sf.write(fd.GetPath(), self.audio_data, self.sample_rate)
-                    wx.MessageBox("Zapisano pomyĹ›lnie!", "Zapis", wx.OK | wx.ICON_INFORMATION)
+                    wx.MessageBox("Zapisano pomyÄąâ€şlnie!", "Zapis", wx.OK | wx.ICON_INFORMATION)
 
     def TogglePlayFile(self, btn, path_ctrl):
         if btn.GetLabel() == self._("play_ref"):
             path = path_ctrl.GetValue().strip()
             if not os.path.exists(path):
-                wx.MessageBox("Plik audio nie istnieje!", "BĹ‚Ä…d", wx.OK | wx.ICON_ERROR)
+                wx.MessageBox("Plik audio nie istnieje!", "BÄąâ€šĂ„â€¦d", wx.OK | wx.ICON_ERROR)
                 return
             try:
                 data, fs = sf.read(path)
@@ -1061,7 +1065,7 @@ class OmniVoiceFrame(wx.Frame):
                 timer = wx.CallLater(duration_ms + 100, lambda: btn.SetLabel(self._("play_ref")))
                 setattr(self, f"timer_{id(btn)}", timer)
             except Exception as e:
-                wx.MessageBox(f"BĹ‚Ä…d odtwarzania: {str(e)}", "BĹ‚Ä…d", wx.OK | wx.ICON_ERROR)
+                wx.MessageBox(f"BÄąâ€šĂ„â€¦d odtwarzania: {str(e)}", "BÄąâ€šĂ„â€¦d", wx.OK | wx.ICON_ERROR)
         else:
             if sd: sd.stop()
             timer = getattr(self, f"timer_{id(btn)}", None)
