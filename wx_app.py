@@ -235,6 +235,57 @@ class OperationDialog:
             else:
                 wx.CallAfter(self.dialog.EndModal, wx.ID_CANCEL)
 
+class DownloadDialog(wx.Dialog):
+    def __init__(self, parent, title, label, repo_id, lang_func):
+        super().__init__(parent, title=title, size=(400, 150))
+        self._ = lang_func
+        self.repo_id = repo_id
+        
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        self.lbl = wx.StaticText(self, label=label)
+        vbox.Add(self.lbl, 0, wx.ALL | wx.EXPAND, 10)
+        
+        self.gauge = wx.Gauge(self, range=100)
+        vbox.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 10)
+        
+        self.btn_cancel = wx.Button(self, label=self._("btn_cancel"))
+        self.btn_cancel.Bind(wx.EVT_BUTTON, self.OnCancel)
+        vbox.Add(self.btn_cancel, 0, wx.ALIGN_CENTER | wx.ALL, 10)
+        
+        self.SetSizer(vbox)
+        self.Bind(wx.EVT_CLOSE, self.OnCancel)
+        
+        self.timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.OnTimer, self.timer)
+        self.timer.Start(50)
+        
+        self.cancel_flag = False
+        
+        import threading
+        self.t = threading.Thread(target=self._dl_worker)
+        self.t.daemon = True
+        self.t.start()
+
+    def OnTimer(self, event):
+        self.gauge.Pulse()
+        if not self.t.is_alive() and not self.cancel_flag:
+            self.EndModal(wx.ID_OK)
+
+    def OnCancel(self, event):
+        msg = self._("cancel_dl_prompt")
+        title = self._("cancel_title")
+        if wx.MessageBox(msg, title, wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
+            self.cancel_flag = True
+            self.timer.Stop()
+            self.EndModal(wx.ID_CANCEL)
+
+    def _dl_worker(self):
+        try:
+            from huggingface_hub import snapshot_download
+            snapshot_download(repo_id=self.repo_id)
+        except Exception as e:
+            wx.CallAfter(wx.MessageBox, str(e), "Error", wx.OK | wx.ICON_ERROR)
+
 class SettingsDialog(wx.Dialog):
     def __init__(self, parent, is_first_run=False, current_cfg=None):
         self.cfg = current_cfg or LoadBasicConfig()
@@ -1010,17 +1061,17 @@ class OmniVoiceFrame(wx.Frame):
     def SetupAutoTab(self, tab):
         vbox = wx.BoxSizer(wx.VERTICAL)
         
-        wx.StaticText(tab, label="Tekst:")
+        wx.StaticText(tab, label=self._("auto_text_lbl"))
         self.auto_text = wx.TextCtrl(tab, style=wx.TE_MULTILINE)
         vbox.Add(self.auto_text, 1, wx.EXPAND | wx.ALL, 5)
         
         hbox = wx.BoxSizer(wx.HORIZONTAL)
-        wx.StaticText(tab, label="Język / Language:")
+        wx.StaticText(tab, label=self._("auto_lang_lbl"))
         self.auto_lang = wx.ComboBox(tab, choices=_ALL_LANGUAGES, style=wx.CB_READONLY)
         self.auto_lang.SetSelection(0)
         hbox.Add(self.auto_lang, 0, wx.RIGHT, 10)
         
-        self.btn_gen_auto = wx.Button(tab, label="Generuj (Losowy głos)")
+        self.btn_gen_auto = wx.Button(tab, label=self._("btn_gen_auto"))
         self.btn_gen_auto.Bind(wx.EVT_BUTTON, self.OnGenAuto)
         hbox.Add(self.btn_gen_auto, 0, wx.ALL, 0)
         
@@ -1049,7 +1100,7 @@ class OmniVoiceFrame(wx.Frame):
                 self.btn_play.SetFocus()
                 wx.Bell()
                 
-        self.RunOperation("Generowanie", "Trwa generowanie losowego głosu...", self._GenAutoWorker, text, lang, speed, duration, norm_txt, success_callback=on_success)
+        self.RunOperation(self._("op_auto_title"), self._("op_auto_msg"), self._GenAutoWorker, text, lang, speed, duration, norm_txt, success_callback=on_success)
 
     def _GenAutoWorker(self, op_dialog, text, lang, speed, duration, norm_txt):
         try:
@@ -1218,28 +1269,7 @@ class OmniVoiceFrame(wx.Frame):
 
 
     def OnShowTags(self, event):
-        msg = """Dostępne specjalne tagi do wpisania w treść tekstu:
-
-Emocje / dźwięki:
-[laughter] - Śmiech
-[sigh] - Westchnienie
-
-Wykrzyknienia / pytania (najlepiej działają z ang):
-[confirmation-en] - Potwierdzenie
-[question-en] - Pytanie ogólne
-[question-ah] - Zdziwienie (Ah?)
-[question-oh] - Zdziwienie (Oh?)
-[question-ei] - Zdziwienie (Ei?)
-[question-yi] - Zdziwienie (Yi?)
-[surprise-ah] - Niespodzianka (Ah!)
-[surprise-oh] - Niespodzianka (Oh!)
-[surprise-wa] - Niespodzianka (Wa!)
-[surprise-yo] - Niespodzianka (Yo!)
-[dissatisfaction-hnn] - Niezadowolenie (Hnn...)
-
-CMU Dict (tylko angielski):
-Możesz wpisać fonemy w nawiasach klamrowych, np. [B EY1 S]."""
-        wx.MessageBox(msg, "Dostępne Tagi", wx.OK | wx.ICON_INFORMATION)
+        wx.MessageBox(self._("msg_tags"), self._("title_tags"), wx.OK | wx.ICON_INFORMATION)
 
 def main():
     app = wx.App(False)
