@@ -260,12 +260,12 @@ class SettingsDialog(wx.Dialog):
         notebook = wx.Notebook(panel)
         tab_app = wx.Panel(notebook)
         
-        notebook.AddPage(tab_app, "Wygląd i Język" if self.lang == "pl" else "Appearance & Language")
+        notebook.AddPage(tab_app, self._("tab_appearance"))
         if not self.is_first_run:
             tab_sys = wx.Panel(notebook)
             tab_opts = wx.Panel(notebook)
-            notebook.AddPage(tab_sys, "System i Presety" if self.lang == "pl" else "System & Presets")
-            notebook.AddPage(tab_opts, "Opcje AI" if self.lang == "pl" else "AI Options")
+            notebook.AddPage(tab_sys, self._("tab_system"))
+            notebook.AddPage(tab_opts, self._("tab_ai_opts"))
             
         vbox_app = wx.BoxSizer(wx.VERTICAL)
         wx.StaticText(tab_app, label=self._("lang_lbl"))
@@ -299,8 +299,8 @@ class SettingsDialog(wx.Dialog):
             self.chk_close_console.SetValue(self.cfg.get("close_console_on_exit", True))
             vbox_sys.Add(self.chk_close_console, 0, wx.ALL | wx.EXPAND, 5)
             
-            wx.StaticText(tab_sys, label="Styl wyświetlania presetów:" if self.lang == "pl" else "Preset display style:")
-            self.cb_preset_disp = wx.ComboBox(tab_sys, choices=["Tylko nazwa / Name only", "Pełna ścieżka / Full path", "Nazwa i ścieżka / Name and path"], style=wx.CB_READONLY)
+            wx.StaticText(tab_sys, label=self._("preset_disp_lbl"))
+            self.cb_preset_disp = wx.ComboBox(tab_sys, choices=[self._("disp_name"), self._("disp_path"), self._("disp_both")], style=wx.CB_READONLY)
             cur_disp = self.cfg.get("preset_display_mode", "name")
             if cur_disp == "name": self.cb_preset_disp.SetSelection(0)
             elif cur_disp == "path": self.cb_preset_disp.SetSelection(1)
