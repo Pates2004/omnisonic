@@ -840,6 +840,8 @@ class OmniVoiceFrame(wx.Frame):
         def_cfg = self.cfg.get("ai_cfg", 2.0) if self.cfg.get("remember_ai_settings", True) else 2.0
         self.spin_cfg = wx.SpinCtrlDouble(tab, value=str(def_cfg), min=0.1, max=10.0, inc=0.1)
         self.spin_cfg.SetName(lbl_cfg)
+        self.spin_cfg.SetToolTip(lbl_cfg)
+        for child in self.spin_cfg.GetChildren(): child.SetName(lbl_cfg)
         vbox.Add(self.spin_cfg, 0, wx.ALL, 5)
         
         lbl_speed = self._("speed")
@@ -847,6 +849,8 @@ class OmniVoiceFrame(wx.Frame):
         def_speed = self.cfg.get("ai_speed", 1.0) if self.cfg.get("remember_ai_settings", True) else 1.0
         self.spin_speed = wx.SpinCtrlDouble(tab, value=str(def_speed), min=0.1, max=5.0, inc=0.1)
         self.spin_speed.SetName(lbl_speed)
+        self.spin_speed.SetToolTip(lbl_speed)
+        for child in self.spin_speed.GetChildren(): child.SetName(lbl_speed)
         vbox.Add(self.spin_speed, 0, wx.ALL, 5)
         
         lbl_denoise = self._("denoise")
