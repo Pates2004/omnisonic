@@ -758,10 +758,11 @@ class OmniVoiceFrame(wx.Frame):
         self.design_lang.SetValue("Auto")
         vbox.Add(self.design_lang, 0, wx.EXPAND | wx.ALL, 5)
         self.design_combos = []
-        for cat, choices in _CATEGORIES.items():
+        categories = _CAT_PL if self.cfg.get("language", "pl") == "pl" else _CAT_EN
+        for cat, choices in categories.items():
             hbox = wx.BoxSizer(wx.HORIZONTAL)
             label = wx.StaticText(tab, label=f"{cat}:", size=(150, -1))
-            combo = wx.ComboBox(tab, choices=["Brak/None"] + choices, style=wx.CB_READONLY)
+            combo = wx.ComboBox(tab, choices=choices, style=wx.CB_READONLY)
             combo.SetName(cat)
             combo.SetSelection(0)
             hbox.Add(label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
