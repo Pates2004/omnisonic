@@ -110,6 +110,10 @@ class StartupSplash:
                 if dlg.ShowModal() == wx.ID_YES:
                     import sys
                     sys.exit(0)
+                else:
+                    import wx
+                    if hasattr(wx, "CloseEvent") and isinstance(evt, wx.CloseEvent):
+                        evt.Veto()
             btn.Bind(wx.EVT_BUTTON, OnCancel)
             self.dialog.Bind(wx.EVT_CLOSE, OnCancel)
             vbox.Add(btn, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL, 5)
@@ -204,6 +208,10 @@ class OperationDialog:
                 dlg = wx.MessageDialog(self.dialog, self._("stop_confirm"), self._("warning_title"), wx.YES_NO | wx.ICON_QUESTION)
                 if dlg.ShowModal() == wx.ID_YES:
                     self.cancel_flag = True
+                else:
+                    import wx
+                    if hasattr(wx, "CloseEvent") and isinstance(evt, wx.CloseEvent):
+                        evt.Veto()
             btn.Bind(wx.EVT_BUTTON, OnCancel)
             self.dialog.Bind(wx.EVT_CLOSE, OnCancel)
             vbox.Add(btn, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL, 5)
@@ -288,7 +296,7 @@ class DownloadDialog(wx.Dialog):
             from huggingface_hub import snapshot_download
             snapshot_download(repo_id=self.repo_id)
         except Exception as e:
-            wx.CallAfter(wx.MessageBox, str(e), "Error", wx.OK | wx.ICON_ERROR)
+            wx.CallAfter(wx.MessageBox, str(e), self._("error_title"), wx.OK | wx.ICON_ERROR)
 
 class SettingsDialog(wx.Dialog):
     def __init__(self, parent, is_first_run=False, current_cfg=None):
@@ -509,16 +517,20 @@ class SettingsDialog(wx.Dialog):
         self.EndModal(wx.ID_OK)
         
     def OnCancel(self, event):
-        self.HandleCancel()
+        self.HandleCancel(event)
         
     def OnClose(self, event):
-        self.HandleCancel()
+        self.HandleCancel(event)
         
-    def HandleCancel(self):
+    def HandleCancel(self, event=None):
         if self.is_first_run:
             dlg = wx.MessageDialog(self, self._("exit_confirm"), self._("warning_title"), wx.YES_NO | wx.ICON_QUESTION)
             if dlg.ShowModal() == wx.ID_YES:
                 self.EndModal(wx.ID_CANCEL)
+            else:
+                import wx
+                if event and hasattr(wx, "CloseEvent") and isinstance(event, wx.CloseEvent):
+                    event.Veto()
         else:
             self.EndModal(wx.ID_CANCEL)
 
@@ -1025,7 +1037,7 @@ class OmniVoiceFrame(wx.Frame):
             
         use_preset = preset is not None
         if not use_preset and not os.path.exists(ref_audio):
-            wx.MessageBox("Wybierz plik audio lub preset. / Select reference audio or a preset.", self._("error_title"), wx.OK | wx.ICON_ERROR)
+            wx.MessageBox(self._("err_no_audio_preset"), self._("error_title"), wx.OK | wx.ICON_ERROR)
             return
             
         preset_path = os.path.join(PRESETS_DIR, preset) if use_preset else None
@@ -1178,7 +1190,7 @@ class OmniVoiceFrame(wx.Frame):
         name = self.preset_name.GetValue().strip()
         
         if not os.path.exists(ref_audio) or not name:
-            wx.MessageBox("Zły plik lub brak nazwy presetu. / Bad file or missing preset name.", self._("error_title"), wx.OK | wx.ICON_ERROR)
+            wx.MessageBox(self._("err_bad_preset_name"), self._("error_title"), wx.OK | wx.ICON_ERROR)
             return
             
         def on_success():
@@ -1222,13 +1234,13 @@ class OmniVoiceFrame(wx.Frame):
             with wx.FileDialog(self, self._("save"), wildcard="WAV (*.wav)|*.wav", style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT) as fd:
                 if fd.ShowModal() != wx.ID_CANCEL:
                     sf.write(fd.GetPath(), self.audio_data, self.sample_rate)
-                    wx.MessageBox("Zapisano pomyÄąâ€şlnie!", "Zapis", wx.OK | wx.ICON_INFORMATION)
+                    wx.MessageBox(self._("msg_save_ok"), self._("title_save"), wx.OK | wx.ICON_INFORMATION)
 
     def TogglePlayFile(self, btn, path_ctrl):
         if btn.GetLabel() == self._("play_ref"):
             path = path_ctrl.GetValue().strip()
             if not os.path.exists(path):
-                wx.MessageBox("Plik audio nie istnieje!", "BÄąâ€šĂ„â€¦d", wx.OK | wx.ICON_ERROR)
+                wx.MessageBox(self._("err_file_not_found"), self._("error_title"), wx.OK | wx.ICON_ERROR)
                 return
             try:
                 data, fs = sf.read(path)
@@ -1238,7 +1250,7 @@ class OmniVoiceFrame(wx.Frame):
                 timer = wx.CallLater(duration_ms + 100, lambda: btn.SetLabel(self._("play_ref")))
                 setattr(self, f"timer_{id(btn)}", timer)
             except Exception as e:
-                wx.MessageBox(f"BÄąâ€šĂ„â€¦d odtwarzania: {str(e)}", "BÄąâ€šĂ„â€¦d", wx.OK | wx.ICON_ERROR)
+                wx.MessageBox(self._("err_playback").format(e=str(e)), self._("error_title"), wx.OK | wx.ICON_ERROR)
         else:
             if sd: sd.stop()
             timer = getattr(self, f"timer_{id(btn)}", None)

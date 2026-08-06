@@ -148,5 +148,12 @@
     "title_dl_model": "Downloading model",
     "msg_dl_conn": "Downloading model {model}...",
     "cancel_dl_prompt": "Are you sure you want to cancel the model download? This may cause issues if canceled during verification.",
-    "cancel_title": "Cancel download"
+    "cancel_title": "Cancel download",
+    "err_no_audio_preset": "Select reference audio or a preset.",
+    "err_bad_preset_name": "Bad file or missing preset name.",
+    "msg_save_ok": "Saved successfully!",
+    "title_save": "Save",
+    "err_file_not_found": "Audio file does not exist!",
+    "err_playback": "Playback error: {e}",
+    "msg_wait": "Please wait..."
 }

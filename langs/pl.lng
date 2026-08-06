@@ -148,5 +148,12 @@
     "title_dl_model": "Pobieranie modelu",
     "msg_dl_conn": "Trwa pobieranie modelu {model}...",
     "cancel_dl_prompt": "Czy na pewno chcesz anulować pobieranie modelu? Może to spowodować problemy z działaniem, jeśli anulujesz w trakcie weryfikacji.",
-    "cancel_title": "Anulowanie pobierania"
+    "cancel_title": "Anulowanie pobierania",
+    "err_no_audio_preset": "Wybierz plik audio lub preset.",
+    "err_bad_preset_name": "Zły plik lub brak nazwy presetu.",
+    "msg_save_ok": "Zapisano pomyślnie!",
+    "title_save": "Zapis",
+    "err_file_not_found": "Plik audio nie istnieje!",
+    "err_playback": "Błąd odtwarzania: {e}",
+    "msg_wait": "Proszę czekać..."
 }
