@@ -429,7 +429,8 @@ class SettingsDialog(wx.Dialog):
             wx.MessageBox(self._("clean_none"), self._("success_title"), wx.OK | wx.ICON_INFORMATION)
 
     def OnSave(self, event):
-        self.cfg["language"] = self.avail_langs[self.cb_lang.GetSelection()]
+        self.lang = self.avail_langs[self.cb_lang.GetSelection()]
+        self.cfg["language"] = self.lang
         self.cfg["theme"] = "light" if self.cb_theme.GetSelection() == 0 else "dark"
         self.cfg["font_size"] = self.spin_font.GetValue()
         
