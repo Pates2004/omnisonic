@@ -123,5 +123,12 @@
     "resume": "Resume",
     "notify_sys_lbl": "Show system notification after generation",
     "notify_pop_lbl": "Show confirmation popup after generation",
-    "gen_success_msg": "Done, file successfully generated!"
+    "gen_success_msg": "Done, file successfully generated!",
+    "tab_appearance": "Appearance & Language",
+    "tab_system": "System & Presets",
+    "tab_ai_opts": "AI Options",
+    "preset_disp_lbl": "Preset display style:",
+    "disp_name": "Name only",
+    "disp_path": "Full path",
+    "disp_both": "Name and path"
 }

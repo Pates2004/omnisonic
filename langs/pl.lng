@@ -123,5 +123,12 @@
     "resume": "Wznów",
     "notify_sys_lbl": "Po zakończeniu generowania wyświetl powiadomienie systemowe",
     "notify_pop_lbl": "Po zakończeniu generowania wyświetl okienko z potwierdzeniem",
-    "gen_success_msg": "Zrobione, plik pomyślnie wygenerowany!"
+    "gen_success_msg": "Zrobione, plik pomyślnie wygenerowany!",
+    "tab_appearance": "Wygląd i Język",
+    "tab_system": "System i Presety",
+    "tab_ai_opts": "Opcje AI",
+    "preset_disp_lbl": "Styl wyświetlania presetów:",
+    "disp_name": "Tylko nazwa",
+    "disp_path": "Pełna ścieżka",
+    "disp_both": "Nazwa i ścieżka"
 }
