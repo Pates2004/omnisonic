@@ -251,98 +251,128 @@ class SettingsDialog(wx.Dialog):
         
     def InitUI(self):
         panel = wx.Panel(self)
-        vbox = wx.BoxSizer(wx.VERTICAL)
+        vbox_main = wx.BoxSizer(wx.VERTICAL)
         
         if self.is_first_run:
             lbl = wx.StaticText(panel, label=self._("first_run_msg"))
-            vbox.Add(lbl, 0, wx.ALL | wx.EXPAND, 10)
+            vbox_main.Add(lbl, 0, wx.ALL | wx.EXPAND, 10)
             
-        wx.StaticText(panel, label=self._("lang_lbl"))
+        notebook = wx.Notebook(panel)
+        tab_app = wx.Panel(notebook)
+        
+        notebook.AddPage(tab_app, "Wygląd i Język" if self.lang == "pl" else "Appearance & Language")
+        if not self.is_first_run:
+            tab_sys = wx.Panel(notebook)
+            tab_opts = wx.Panel(notebook)
+            notebook.AddPage(tab_sys, "System i Presety" if self.lang == "pl" else "System & Presets")
+            notebook.AddPage(tab_opts, "Opcje AI" if self.lang == "pl" else "AI Options")
+            
+        vbox_app = wx.BoxSizer(wx.VERTICAL)
+        wx.StaticText(tab_app, label=self._("lang_lbl"))
         self.avail_langs = list(LOCALE.keys())
         choices = [LOCALE[l].get("lang_name", l) for l in self.avail_langs]
-        self.cb_lang = wx.ComboBox(panel, choices=choices, style=wx.CB_READONLY)
+        self.cb_lang = wx.ComboBox(tab_app, choices=choices, style=wx.CB_READONLY)
         self.cb_lang.SetName(self._("lang_lbl"))
         self.cb_lang.SetSelection(self.avail_langs.index(self.lang) if self.lang in self.avail_langs else 0)
-        vbox.Add(self.cb_lang, 0, wx.ALL | wx.EXPAND, 5)
+        vbox_app.Add(self.cb_lang, 0, wx.ALL | wx.EXPAND, 5)
         
-        wx.StaticText(panel, label=self._("theme_lbl"))
-        self.cb_theme = wx.ComboBox(panel, choices=[self._("theme_light"), self._("theme_dark")], style=wx.CB_READONLY)
+        wx.StaticText(tab_app, label=self._("theme_lbl"))
+        self.cb_theme = wx.ComboBox(tab_app, choices=[self._("theme_light"), self._("theme_dark")], style=wx.CB_READONLY)
         self.cb_theme.SetName(self._("theme_lbl"))
         self.cb_theme.SetSelection(0 if self.cfg.get("theme", "light") == "light" else 1)
-        vbox.Add(self.cb_theme, 0, wx.ALL | wx.EXPAND, 5)
+        vbox_app.Add(self.cb_theme, 0, wx.ALL | wx.EXPAND, 5)
         
-        wx.StaticText(panel, label=self._("font_size_lbl"))
-        self.spin_font = wx.SpinCtrl(panel, value=str(self.cfg.get("font_size", 10)), min=8, max=24)
+        wx.StaticText(tab_app, label=self._("font_size_lbl"))
+        self.spin_font = wx.SpinCtrl(tab_app, value=str(self.cfg.get("font_size", 10)), min=8, max=24)
         self.spin_font.SetName(self._("font_size_lbl"))
-        vbox.Add(self.spin_font, 0, wx.ALL | wx.EXPAND, 5)
+        vbox_app.Add(self.spin_font, 0, wx.ALL | wx.EXPAND, 5)
+        tab_app.SetSizer(vbox_app)
         
         if not self.is_first_run:
-            self.chk_console = wx.CheckBox(panel, label=self._("console_lbl"))
+            vbox_sys = wx.BoxSizer(wx.VERTICAL)
+            
+            self.chk_console = wx.CheckBox(tab_sys, label=self._("console_lbl"))
             self.chk_console.SetValue(self.cfg.get("show_console", False))
-            vbox.Add(self.chk_console, 0, wx.ALL | wx.EXPAND, 5)
+            vbox_sys.Add(self.chk_console, 0, wx.ALL | wx.EXPAND, 5)
             
-            self.chk_close_console = wx.CheckBox(panel, label=self._("close_console_lbl"))
+            self.chk_close_console = wx.CheckBox(tab_sys, label=self._("close_console_lbl"))
             self.chk_close_console.SetValue(self.cfg.get("close_console_on_exit", True))
-            vbox.Add(self.chk_close_console, 0, wx.ALL | wx.EXPAND, 5)
+            vbox_sys.Add(self.chk_close_console, 0, wx.ALL | wx.EXPAND, 5)
             
-            self.chk_force_splash = wx.CheckBox(panel, label=self._("force_splash_lbl"))
-            self.chk_force_splash.SetValue(self.cfg.get("force_splash", False))
-            vbox.Add(self.chk_force_splash, 0, wx.ALL | wx.EXPAND, 5)
+            wx.StaticText(tab_sys, label="Styl wyświetlania presetów:" if self.lang == "pl" else "Preset display style:")
+            self.cb_preset_disp = wx.ComboBox(tab_sys, choices=["Tylko nazwa / Name only", "Pełna ścieżka / Full path", "Nazwa i ścieżka / Name and path"], style=wx.CB_READONLY)
+            cur_disp = self.cfg.get("preset_display_mode", "name")
+            if cur_disp == "name": self.cb_preset_disp.SetSelection(0)
+            elif cur_disp == "path": self.cb_preset_disp.SetSelection(1)
+            else: self.cb_preset_disp.SetSelection(2)
+            vbox_sys.Add(self.cb_preset_disp, 0, wx.ALL | wx.EXPAND, 5)
             
-            self.chk_show_progress = wx.CheckBox(panel, label=self._("show_progress_lbl"))
-            self.chk_show_progress.SetValue(self.cfg.get("show_progress", True))
-            vbox.Add(self.chk_show_progress, 0, wx.ALL | wx.EXPAND, 5)
-            
-            self.chk_use_native = wx.CheckBox(panel, label=self._("use_native_dialogs_lbl"))
-            self.chk_use_native.SetValue(self.cfg.get("use_native_dialogs", False))
-            vbox.Add(self.chk_use_native, 0, wx.ALL | wx.EXPAND, 5)
-            
-            self.chk_validate = wx.CheckBox(panel, label=self._("validate_lbl"))
-            self.chk_validate.SetValue(self.cfg.get("validate_components", False))
-            vbox.Add(self.chk_validate, 0, wx.ALL | wx.EXPAND, 5)
-            
-            self.chk_warn_exit = wx.CheckBox(panel, label=self._("warn_exit_lbl"))
-            self.chk_warn_exit.SetValue(self.cfg.get("warn_exit", True))
-            vbox.Add(self.chk_warn_exit, 0, wx.ALL | wx.EXPAND, 5)
-            
-            self.chk_confirm_success = wx.CheckBox(panel, label=self._("confirm_success_lbl"))
-            self.chk_confirm_success.SetValue(self.cfg.get("confirm_success", False))
-            vbox.Add(self.chk_confirm_success, 0, wx.ALL | wx.EXPAND, 5)
-            
-            self.chk_remember_ai = wx.CheckBox(panel, label=self._("remember_ai_lbl"))
-            self.chk_remember_ai.SetValue(self.cfg.get("remember_ai_settings", True))
-            vbox.Add(self.chk_remember_ai, 0, wx.ALL | wx.EXPAND, 5)
-            
-            self.chk_clean_temp = wx.CheckBox(panel, label=self._("clean_temp_lbl"))
+            self.chk_clean_temp = wx.CheckBox(tab_sys, label=self._("clean_temp_lbl"))
             self.chk_clean_temp.SetValue(self.cfg.get("clean_temp", True))
-            vbox.Add(self.chk_clean_temp, 0, wx.ALL | wx.EXPAND, 5)
+            vbox_sys.Add(self.chk_clean_temp, 0, wx.ALL | wx.EXPAND, 5)
             
-            self.btn_clean_temp = wx.Button(panel, label=self._("clean_temp_btn"))
+            self.btn_clean_temp = wx.Button(tab_sys, label=self._("clean_temp_btn"))
             self.btn_clean_temp.Bind(wx.EVT_BUTTON, self.OnCleanTemp)
-            vbox.Add(self.btn_clean_temp, 0, wx.ALL | wx.EXPAND, 5)
+            vbox_sys.Add(self.btn_clean_temp, 0, wx.ALL | wx.EXPAND, 5)
+            tab_sys.SetSizer(vbox_sys)
+            
+            vbox_opts = wx.BoxSizer(wx.VERTICAL)
+            
+            self.chk_force_splash = wx.CheckBox(tab_opts, label=self._("force_splash_lbl"))
+            self.chk_force_splash.SetValue(self.cfg.get("force_splash", False))
+            vbox_opts.Add(self.chk_force_splash, 0, wx.ALL | wx.EXPAND, 5)
+            
+            self.chk_show_progress = wx.CheckBox(tab_opts, label=self._("show_progress_lbl"))
+            self.chk_show_progress.SetValue(self.cfg.get("show_progress", True))
+            vbox_opts.Add(self.chk_show_progress, 0, wx.ALL | wx.EXPAND, 5)
+            
+            self.chk_use_native = wx.CheckBox(tab_opts, label=self._("use_native_dialogs_lbl"))
+            self.chk_use_native.SetValue(self.cfg.get("use_native_dialogs", False))
+            vbox_opts.Add(self.chk_use_native, 0, wx.ALL | wx.EXPAND, 5)
+            
+            self.chk_validate = wx.CheckBox(tab_opts, label=self._("validate_lbl"))
+            self.chk_validate.SetValue(self.cfg.get("validate_components", False))
+            vbox_opts.Add(self.chk_validate, 0, wx.ALL | wx.EXPAND, 5)
+            
+            self.chk_warn_exit = wx.CheckBox(tab_opts, label=self._("warn_exit_lbl"))
+            self.chk_warn_exit.SetValue(self.cfg.get("warn_exit", True))
+            vbox_opts.Add(self.chk_warn_exit, 0, wx.ALL | wx.EXPAND, 5)
+            
+            self.chk_confirm_success = wx.CheckBox(tab_opts, label=self._("confirm_success_lbl"))
+            self.chk_confirm_success.SetValue(self.cfg.get("confirm_success", False))
+            vbox_opts.Add(self.chk_confirm_success, 0, wx.ALL | wx.EXPAND, 5)
+            
+            self.chk_remember_ai = wx.CheckBox(tab_opts, label=self._("remember_ai_lbl"))
+            self.chk_remember_ai.SetValue(self.cfg.get("remember_ai_settings", True))
+            vbox_opts.Add(self.chk_remember_ai, 0, wx.ALL | wx.EXPAND, 5)
             
             hbox_reset = wx.BoxSizer(wx.HORIZONTAL)
-            self.btn_reset_ai = wx.Button(panel, label=self._("reset_ai_btn"))
-            self.btn_reset_app = wx.Button(panel, label=self._("reset_app_btn"))
+            self.btn_reset_ai = wx.Button(tab_opts, label=self._("reset_ai_btn"))
+            self.btn_reset_app = wx.Button(tab_opts, label=self._("reset_app_btn"))
             
             self.btn_reset_ai.Bind(wx.EVT_BUTTON, self.OnResetAI)
             self.btn_reset_app.Bind(wx.EVT_BUTTON, self.OnResetApp)
             
-            hbox_reset.Add(self.btn_reset_ai, 1, wx.ALL | wx.EXPAND, 5)
-            hbox_reset.Add(self.btn_reset_app, 1, wx.ALL | wx.EXPAND, 5)
-            vbox.Add(hbox_reset, 0, wx.EXPAND)
-        
+            hbox_reset.Add(self.btn_reset_ai, 1, wx.EXPAND | wx.RIGHT, 5)
+            hbox_reset.Add(self.btn_reset_app, 1, wx.EXPAND, 0)
+            vbox_opts.Add(hbox_reset, 0, wx.ALL | wx.EXPAND, 5)
+            tab_opts.SetSizer(vbox_opts)
+            
+        vbox_main.Add(notebook, 1, wx.EXPAND | wx.ALL, 5)
+            
         hbox = wx.BoxSizer(wx.HORIZONTAL)
-        btn_ok = wx.Button(panel, label=self._("btn_save"))
-        btn_ok.Bind(wx.EVT_BUTTON, self.OnSave)
+        btn_ok = wx.Button(panel, label="OK")
         btn_cancel = wx.Button(panel, label=self._("btn_cancel"))
+        
+        btn_ok.Bind(wx.EVT_BUTTON, self.OnSave)
         btn_cancel.Bind(wx.EVT_BUTTON, self.OnCancel)
         
-        hbox.Add(btn_ok, 1, wx.RIGHT, 5)
-        hbox.Add(btn_cancel, 1, 0, 0)
-        vbox.Add(hbox, 0, wx.ALL | wx.EXPAND, 10)
+        hbox.Add(btn_ok, 1, wx.EXPAND | wx.RIGHT, 5)
+        hbox.Add(btn_cancel, 1, wx.EXPAND, 0)
         
-        panel.SetSizer(vbox)
+        vbox_main.Add(hbox, 0, wx.ALL | wx.EXPAND, 5)
+        
+        panel.SetSizer(vbox_main)
         self.Bind(wx.EVT_CLOSE, self.OnClose)
         
     def OnResetAI(self, event):
@@ -406,6 +436,8 @@ class SettingsDialog(wx.Dialog):
         if not self.is_first_run:
             self.cfg["show_console"] = self.chk_console.GetValue()
             self.cfg["close_console_on_exit"] = self.chk_close_console.GetValue()
+            idx = self.cb_preset_disp.GetSelection()
+            self.cfg["preset_display_mode"] = "name" if idx == 0 else ("path" if idx == 1 else "name_path")
             self.cfg["force_splash"] = self.chk_force_splash.GetValue()
             self.cfg["show_progress"] = self.chk_show_progress.GetValue()
             self.cfg["use_native_dialogs"] = self.chk_use_native.GetValue()
@@ -720,7 +752,8 @@ class OmniVoiceFrame(wx.Frame):
         wx.StaticText(tab, label=self._("lang_select"))
         self.clone_lang = wx.ComboBox(tab, choices=_ALL_LANGUAGES, style=wx.CB_READONLY)
         self.clone_lang.SetName(self._("lang_select"))
-        self.clone_lang.SetValue("Auto")
+        def_clone_lang = self.cfg.get("clone_lang", "Auto") if self.cfg.get("remember_ai_settings", True) else "Auto"
+        self.clone_lang.SetValue(def_clone_lang)
         vbox.Add(self.clone_lang, 0, wx.EXPAND | wx.ALL, 5)
         self.btn_gen_clone = wx.Button(tab, label=self._("gen_clone"))
         self.btn_gen_clone.Bind(wx.EVT_BUTTON, self.OnGenClone)
@@ -736,7 +769,8 @@ class OmniVoiceFrame(wx.Frame):
         wx.StaticText(tab, label=self._("lang_select"))
         self.design_lang = wx.ComboBox(tab, choices=_ALL_LANGUAGES, style=wx.CB_READONLY)
         self.design_lang.SetName(self._("lang_select"))
-        self.design_lang.SetValue("Auto")
+        def_design_lang = self.cfg.get("design_lang", "Auto") if self.cfg.get("remember_ai_settings", True) else "Auto"
+        self.design_lang.SetValue(def_design_lang)
         vbox.Add(self.design_lang, 0, wx.EXPAND | wx.ALL, 5)
         self.design_combos = []
         for cat, choices in _CATEGORIES.items():
@@ -831,9 +865,26 @@ class OmniVoiceFrame(wx.Frame):
         self.BrowseFor(self.clone_ref_audio)
         
     def RefreshPresets(self):
-        pts = [f for f in os.listdir(PRESETS_DIR) if f.endswith(".pt")]
-        pts.insert(0, self._("no_preset"))
-        self.combo_presets.SetItems(pts)
+        self.combo_presets.Clear()
+        self.combo_presets.Append(self._("no_preset"), None)
+        
+        if os.path.exists(PRESETS_DIR):
+            pts = [f for f in os.listdir(PRESETS_DIR) if f.endswith(".pt")]
+            display_mode = self.cfg.get("preset_display_mode", "name")
+            
+            for pt in pts:
+                name_only = pt.replace(".pt", "")
+                full_path = os.path.abspath(os.path.join(PRESETS_DIR, pt))
+                
+                if display_mode == "name":
+                    disp = name_only
+                elif display_mode == "path":
+                    disp = full_path
+                else: # name_path
+                    disp = f"{name_only} ({full_path})"
+                    
+                self.combo_presets.Append(disp, pt)
+                
         self.combo_presets.SetSelection(0)
         
     def Log(self, msg, success=False):
@@ -898,15 +949,16 @@ class OmniVoiceFrame(wx.Frame):
         
         ref_text = self.clone_ref_text.GetValue().strip() or None
         ref_audio = self.clone_ref_audio.GetValue().strip()
-        preset = self.combo_presets.GetValue()
+        preset_idx = self.combo_presets.GetSelection()
+        preset = self.combo_presets.GetClientData(preset_idx) if preset_idx != wx.NOT_FOUND else None
         speed = self.spin_speed.GetValue()
         
         if not text:
             return
             
-        use_preset = preset != self._("no_preset")
+        use_preset = preset is not None
         if not use_preset and not os.path.exists(ref_audio):
-            wx.MessageBox("Wybierz plik audio lub preset. / Select reference audio or a preset.", self._("error_title"))
+            wx.MessageBox("Wybierz plik audio lub preset. / Select reference audio or a preset.", self._("error_title"), wx.OK | wx.ICON_ERROR)
             return
             
         preset_path = os.path.join(PRESETS_DIR, preset) if use_preset else None
@@ -988,13 +1040,15 @@ class OmniVoiceFrame(wx.Frame):
         name = self.preset_name.GetValue().strip()
         
         if not os.path.exists(ref_audio) or not name:
-            wx.MessageBox("ZÄąâ€šy plik lub brak nazwy presetu. / Bad file or missing preset name.", self._("error_title"))
+            wx.MessageBox("Zły plik lub brak nazwy presetu. / Bad file or missing preset name.", self._("error_title"), wx.OK | wx.ICON_ERROR)
             return
             
         def on_success():
             self.Log(self._("ready"), success=True)
             self.RefreshPresets()
-            wx.Bell()
+            self.preset_name.SetValue("")
+            msg = self._("preset_created_msg").replace("{name}", name)
+            wx.MessageBox(msg, self._("success_title"), wx.OK | wx.ICON_INFORMATION)
             
         self.RunOperation("op_preset_title", "op_preset_msg", self._SavePresetWorker, ref_audio, ref_text, name, success_callback=on_success)
         

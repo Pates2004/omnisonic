@@ -115,5 +115,9 @@
     "val_Korean Accent": "Koreański",
     "val_Portuguese Accent": "Portugalski",
     "val_Russian Accent": "Rosyjski",
-    "val_Japanese Accent": "Japoński"
+    "val_Japanese Accent": "Japoński",
+    "preset_created_msg": "Preset {name} został utworzony pomyślnie!",
+    "delete": "Usuń",
+    "pause": "Pauza",
+    "stop_play": "Zatrzymaj"
 }
