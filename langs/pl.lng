@@ -144,7 +144,6 @@
     "duration_lbl": "Wymuś długość nagrania w sekundach:",
     "menu_tags": "Tagi i Symbole",
     "menu_tags_help": "Wyświetl dostępne tagi mowy",
-    "menu_help": "Pomoc",
     "title_tags": "Dostępne Tagi",
     "msg_tags": "Dostępne specjalne tagi do wpisania w treść tekstu:\n\nEmocje / dźwięki:\n[laughter] - Śmiech\n[sigh] - Westchnienie\n\nWykrzyknienia / pytania (najlepiej działają z ang):\n[confirmation-en] - Potwierdzenie\n[question-en] - Pytanie ogólne\n[question-ah] - Zdziwienie (Ah?)\n[question-oh] - Zdziwienie (Oh?)\n[question-ei] - Zdziwienie (Ei?)\n[question-yi] - Zdziwienie (Yi?)\n[surprise-ah] - Niespodzianka (Ah!)\n[surprise-oh] - Niespodzianka (Oh!)\n[surprise-wa] - Niespodzianka (Wa!)\n[surprise-yo] - Niespodzianka (Yo!)\n[dissatisfaction-hnn] - Niezadowolenie (Hnn...)\n\nCMU Dict (tylko angielski):\nMożesz wpisać fonemy w nawiasach klamrowych, np. [B EY1 S].",
     "msg_dl_model": "Program za chwilę pobierze nowy model: {model}. Zależnie od połączenia może to potrwać parę minut.\n\nCzy chcesz kontynuować?",
@@ -169,5 +168,7 @@
     "warn_del_all": "Czy na pewno chcesz usunąć wszystkie presety?\nTej akcji nie można cofnąć!",
     "warn_no_show": "Nie pokazuj więcej tego ostrzeżenia",
     "msg_no_preset_sel": "Nie wybrano presetu.",
-    "msg_presets_deleted": "Usunięto wszystkie presety."
+    "msg_presets_deleted": "Usunięto wszystkie presety.",
+    "dl_model_prompt": "Wybrany model ({name}) nie jest pobrany. Czy chcesz go pobrać i zainstalować teraz?",
+    "dl_title": "Pobieranie modelu"
 }
