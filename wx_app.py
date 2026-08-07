@@ -543,16 +543,13 @@ class SettingsDialog(wx.Dialog):
         self.HandleCancel(event)
         
     def HandleCancel(self, event=None):
-        if self.is_first_run:
-            dlg = wx.MessageDialog(self, self._("exit_confirm"), self._("warning_title"), wx.YES_NO | wx.ICON_QUESTION)
-            if dlg.ShowModal() == wx.ID_YES:
-                self.EndModal(wx.ID_CANCEL)
-            else:
-                import wx
-                if event and hasattr(wx, "CloseEvent") and isinstance(event, wx.CloseEvent):
-                    event.Veto()
-        else:
+        dlg = wx.MessageDialog(self, self._("exit_confirm"), self._("warning_title"), wx.YES_NO | wx.ICON_QUESTION)
+        if dlg.ShowModal() == wx.ID_YES:
             self.EndModal(wx.ID_CANCEL)
+        else:
+            import wx
+            if event and hasattr(wx, "CloseEvent") and isinstance(event, wx.CloseEvent):
+                event.Veto()
 
 
 class OmniVoiceFrame(wx.Frame):
@@ -634,6 +631,12 @@ class OmniVoiceFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda e: self.Close(), item_exit)
         
         menubar.Append(progMenu, self._("menu_prog"))
+        
+        helpMenu = wx.Menu()
+        item_tags = helpMenu.Append(wx.ID_ANY, self._("menu_help_tags"))
+        self.Bind(wx.EVT_MENU, self.OnShowTags, item_tags)
+        menubar.Append(helpMenu, self._("menu_help"))
+        
         self.SetMenuBar(menubar)
         
         self.panel = wx.Panel(self)
@@ -651,12 +654,16 @@ class OmniVoiceFrame(wx.Frame):
         self.tab_design = wx.Panel(self.notebook)
         self.tab_adv = wx.Panel(self.notebook)
         
+        self.tab_auto = wx.Panel(self.notebook)
+        
         self.notebook.AddPage(self.tab_clone, self._("tab_clone"))
         self.notebook.AddPage(self.tab_design, self._("tab_design"))
+        self.notebook.AddPage(self.tab_auto, self._("tab_auto"))
         self.notebook.AddPage(self.tab_adv, self._("tab_adv"))
         
         self.SetupCloneTab(self.tab_clone)
         self.SetupDesignTab(self.tab_design)
+        self.SetupAutoTab(self.tab_auto)
         self.SetupAdvTab(self.tab_adv)
         
         self.main_vbox.Add(self.notebook, 1, wx.EXPAND | wx.ALL, 5)
@@ -682,11 +689,16 @@ class OmniVoiceFrame(wx.Frame):
         self.btn_play.Bind(wx.EVT_BUTTON, self.OnPlayAudio)
         self.btn_play.Disable()
         
+        self.btn_pause = wx.Button(self.panel, label=self._("btn_pause"))
+        self.btn_pause.Bind(wx.EVT_BUTTON, self.OnPauseAudio)
+        self.btn_pause.Disable()
+        
         self.btn_save = wx.Button(self.panel, label=self._("save"))
         self.btn_save.Bind(wx.EVT_BUTTON, self.OnSaveAudio)
         self.btn_save.Disable()
         
         hbox_audio.Add(self.btn_play, 1, wx.EXPAND | wx.RIGHT, 5)
+        hbox_audio.Add(self.btn_pause, 1, wx.EXPAND | wx.RIGHT, 5)
         hbox_audio.Add(self.btn_save, 1, wx.EXPAND, 0)
         self.main_vbox.Add(hbox_audio, 0, wx.EXPAND | wx.ALL, 5)
         
@@ -1304,17 +1316,57 @@ class OmniVoiceFrame(wx.Frame):
             event.Skip()
 
     def OnPlayAudio(self, event):
-        if self.btn_play.GetLabel() == self._("play"):
+        if self.btn_play.GetLabel() in [self._("play"), self._("resume_play")]:
             if self.audio_data is not None and sd:
-                sd.play(self.audio_data, samplerate=self.sample_rate)
+                if not hasattr(self, 'is_paused') or not self.is_paused:
+                    self.current_frame = 0
+                    self.total_frames = len(self.audio_data)
+                    self.is_paused = False
+                    
+                frames_left = self.total_frames - self.current_frame
+                sd.play(self.audio_data[self.current_frame:], samplerate=self.sample_rate)
+                
                 self.btn_play.SetLabel(self._("stop_play"))
-                duration_ms = int((len(self.audio_data) / self.sample_rate) * 1000)
+                self.btn_pause.Enable()
+                self.btn_pause.SetLabel(self._("btn_pause"))
+                
+                duration_ms = int((frames_left / self.sample_rate) * 1000)
                 if hasattr(self, 'play_timer'): self.play_timer.Stop()
-                self.play_timer = wx.CallLater(duration_ms + 100, lambda: self.btn_play.SetLabel(self._("play")))
-        else:
+                
+                def on_finish():
+                    self.btn_play.SetLabel(self._("play"))
+                    self.btn_pause.Disable()
+                    self.is_paused = False
+                    self.current_frame = 0
+                    
+                self.play_timer = wx.CallLater(duration_ms + 100, on_finish)
+                
+        else: # stop play
             if sd: sd.stop()
             if hasattr(self, 'play_timer'): self.play_timer.Stop()
             self.btn_play.SetLabel(self._("play"))
+            self.btn_pause.Disable()
+            self.btn_pause.SetLabel(self._("btn_pause"))
+            self.is_paused = False
+            self.current_frame = 0
+
+    def OnPauseAudio(self, event):
+        if not hasattr(self, 'is_paused'):
+            self.is_paused = False
+            
+        if sd and self.btn_play.GetLabel() == self._("stop_play"):
+            if not self.is_paused:
+                self.is_paused = True
+                if hasattr(self, 'play_timer'):
+                    # Save progress
+                    elapsed_ms = self.play_timer.GetInterval() - self.play_timer.TimeRemaining()
+                    self.current_frame += int((elapsed_ms / 1000) * self.sample_rate)
+                    self.play_timer.Stop()
+                sd.stop()
+                self.btn_play.SetLabel(self._("resume_play"))
+                self.btn_pause.SetLabel(self._("play")) # Swap button text conceptually or just keep it "pause", actually disable it is better, no let's just make Play button "Resume"
+                self.btn_pause.Disable()
+                
 
     def OnSaveAudio(self, event):
         if self.audio_data is not None and sf:
