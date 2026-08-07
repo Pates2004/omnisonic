@@ -156,5 +156,15 @@
     "err_file_not_found": "Plik audio nie istnieje!",
     "err_playback": "Błąd odtwarzania: {e}",
     "msg_wait": "Proszę czekać...",
-    "fake_progress_lbl": "Pokaż sztuczne procenty paska postępu"
+    "fake_progress_lbl": "Pokazuj dostępny symulowany postęp paska postępu",
+    "btn_save_preset_clone": "Zapisz jako preset",
+    "prompt_preset_name": "Podaj nazwę dla nowego presetu:",
+    "preset_name_title": "Zapisz preset",
+    "btn_del_preset": "Usuń preset",
+    "btn_del_all_presets": "Usuń wszystkie presety",
+    "warn_del_preset": "Czy na pewno chcesz skasować preset {name}?\nTej akcji nie można cofnąć!",
+    "warn_del_all": "Czy na pewno chcesz usunąć wszystkie presety?\nTej akcji nie można cofnąć!",
+    "warn_no_show": "Nie pokazuj więcej tego ostrzeżenia",
+    "msg_no_preset_sel": "Nie wybrano presetu.",
+    "msg_presets_deleted": "Usunięto wszystkie presety."
 }

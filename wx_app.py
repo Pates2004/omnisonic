@@ -521,6 +521,9 @@ class SettingsDialog(wx.Dialog):
             self.cfg["confirm_success"] = self.chk_confirm_success.GetValue()
             self.cfg["remember_ai_settings"] = self.chk_remember_ai.GetValue()
             self.cfg["clean_temp"] = self.chk_clean_temp.GetValue()
+            if hasattr(self.GetParent(), 'chk_duration'):
+                self.cfg["use_duration"] = self.GetParent().chk_duration.GetValue()
+                self.cfg["duration_val"] = self.GetParent().spin_duration.GetValue()
             
         self.cfg["first_run_done"] = True
         if self.is_first_run:
@@ -804,10 +807,21 @@ class OmniVoiceFrame(wx.Frame):
         wx.StaticText(tab, label=self._("preset_list"))
         hbox_p = wx.BoxSizer(wx.HORIZONTAL)
         self.combo_presets = wx.ComboBox(tab, style=wx.CB_READONLY)
+        self.combo_presets.Bind(wx.EVT_KEY_DOWN, self.OnPresetKeyDown)
+        
         btn_refresh = wx.Button(tab, label=self._("refresh"))
         btn_refresh.Bind(wx.EVT_BUTTON, lambda e: self.RefreshPresets())
+        
+        btn_del_preset = wx.Button(tab, label=self._("btn_del_preset"))
+        btn_del_preset.Bind(wx.EVT_BUTTON, self.OnDelPreset)
+        
+        btn_del_all = wx.Button(tab, label=self._("btn_del_all_presets"))
+        btn_del_all.Bind(wx.EVT_BUTTON, self.OnDelAllPresets)
+        
         hbox_p.Add(self.combo_presets, 1, wx.EXPAND | wx.RIGHT, 5)
-        hbox_p.Add(btn_refresh, 0, wx.EXPAND, 0)
+        hbox_p.Add(btn_refresh, 0, wx.EXPAND | wx.RIGHT, 5)
+        hbox_p.Add(btn_del_preset, 0, wx.EXPAND | wx.RIGHT, 5)
+        hbox_p.Add(btn_del_all, 0, wx.EXPAND, 0)
         vbox.Add(hbox_p, 0, wx.EXPAND | wx.ALL, 5)
         wx.StaticText(tab, label=self._("ref_audio"))
         hbox_ref = wx.BoxSizer(wx.HORIZONTAL)
@@ -825,7 +839,11 @@ class OmniVoiceFrame(wx.Frame):
         hbox_ref.Add(self.clone_ref_audio, 1, wx.EXPAND | wx.RIGHT, 5)
         hbox_ref.Add(btn_browse, 0, wx.EXPAND | wx.RIGHT, 5)
         hbox_ref.Add(self.btn_play_ref, 0, wx.EXPAND | wx.RIGHT, 5)
-        hbox_ref.Add(self.btn_rec_ref, 0, wx.EXPAND, 0)
+        hbox_ref.Add(self.btn_rec_ref, 0, wx.EXPAND | wx.RIGHT, 5)
+        
+        self.btn_save_preset = wx.Button(tab, label=self._("btn_save_preset_clone"))
+        self.btn_save_preset.Bind(wx.EVT_BUTTON, self.OnSavePresetPrompt)
+        hbox_ref.Add(self.btn_save_preset, 0, wx.EXPAND, 0)
         vbox.Add(hbox_ref, 0, wx.EXPAND | wx.ALL, 5)
         wx.StaticText(tab, label=self._("ref_text"))
         self.clone_ref_text = wx.TextCtrl(tab)
@@ -874,39 +892,6 @@ class OmniVoiceFrame(wx.Frame):
         vbox.Add(self.btn_gen_design, 0, wx.EXPAND | wx.ALL, 5)
         tab.SetSizer(vbox)
 
-    def SetupPresetsTab(self, tab):
-        vbox = wx.BoxSizer(wx.VERTICAL)
-        wx.StaticText(tab, label=self._("ref_audio"))
-        hbox1 = wx.BoxSizer(wx.HORIZONTAL)
-        self.preset_audio = wx.TextCtrl(tab)
-        self.preset_audio.SetName(self._("ref_audio"))
-        btn_br = wx.Button(tab, label=self._("browse"))
-        btn_br.Bind(wx.EVT_BUTTON, lambda e: self.BrowseFor(self.preset_audio))
-        
-        self.btn_play_preset = wx.Button(tab, label=self._("play_ref"))
-        self.btn_play_preset.Bind(wx.EVT_BUTTON, lambda e: self.TogglePlayFile(self.btn_play_preset, self.preset_audio))
-        
-        self.btn_rec_preset = wx.Button(tab, label=self._("rec_ref"))
-        self.btn_rec_preset.Bind(wx.EVT_BUTTON, lambda e: self.ToggleRecord(self.btn_rec_preset, self.preset_audio))
-        
-        hbox1.Add(self.preset_audio, 1, wx.EXPAND | wx.RIGHT, 5)
-        hbox1.Add(btn_br, 0, wx.EXPAND | wx.RIGHT, 5)
-        hbox1.Add(self.btn_play_preset, 0, wx.EXPAND | wx.RIGHT, 5)
-        hbox1.Add(self.btn_rec_preset, 0, wx.EXPAND, 0)
-        vbox.Add(hbox1, 0, wx.EXPAND | wx.ALL, 5)
-        wx.StaticText(tab, label=self._("ref_text"))
-        self.preset_text = wx.TextCtrl(tab)
-        self.preset_text.SetName(self._("ref_text"))
-        vbox.Add(self.preset_text, 0, wx.EXPAND | wx.ALL, 5)
-        wx.StaticText(tab, label=self._("preset_name"))
-        self.preset_name = wx.TextCtrl(tab)
-        self.preset_name.SetName(self._("preset_name"))
-        vbox.Add(self.preset_name, 0, wx.EXPAND | wx.ALL, 5)
-        self.btn_save_preset = wx.Button(tab, label=self._("gen_preset"))
-        self.btn_save_preset.Bind(wx.EVT_BUTTON, self.OnSavePreset)
-        vbox.Add(self.btn_save_preset, 0, wx.EXPAND | wx.ALL, 5)
-        tab.SetSizer(vbox)
-
     def SetupAdvTab(self, tab):
         vbox = wx.BoxSizer(wx.VERTICAL)
         lbl_steps = self._("steps")
@@ -940,6 +925,19 @@ class OmniVoiceFrame(wx.Frame):
         def_denoise = self.cfg.get("ai_denoise", True) if self.cfg.get("remember_ai_settings", True) else True
         self.chk_denoise.SetValue(def_denoise)
         vbox.Add(self.chk_denoise, 0, wx.ALL, 5)
+        
+        lbl_dur = self._("duration_lbl")
+        self.chk_duration = wx.CheckBox(tab, label=lbl_dur)
+        self.chk_duration.SetName(lbl_dur)
+        self.chk_duration.SetValue(self.cfg.get("use_duration", False))
+        vbox.Add(self.chk_duration, 0, wx.ALL, 5)
+        
+        self.spin_duration = wx.SpinCtrlDouble(tab, value=str(self.cfg.get("duration_val", 5.0)), min=0.1, max=100.0, inc=0.5)
+        self.spin_duration.SetName(lbl_dur)
+        self.spin_duration.SetToolTip(lbl_dur)
+        for child in self.spin_duration.GetChildren(): child.SetName(lbl_dur)
+        vbox.Add(self.spin_duration, 0, wx.ALL, 5)
+        
         tab.SetSizer(vbox)
         
     def BrowseFor(self, txt_ctrl):
@@ -1194,27 +1192,35 @@ class OmniVoiceFrame(wx.Frame):
             if not op_dialog.cancel_flag:
                 wx.CallAfter(self.Log, self._("msg_error") + str(e))
             
-    def OnSavePreset(self, event):
+    def OnSavePresetPrompt(self, event):
         if not self.model:
             wx.MessageBox(self._("msg_load_first"), self._("error_title"))
             return
             
-        ref_audio = self.preset_audio.GetValue().strip()
-        ref_text = self.preset_ref_text.GetValue().strip() or None
-        name = self.preset_name.GetValue().strip()
+        ref_audio = self.clone_ref_audio.GetValue().strip()
+        ref_text = self.clone_ref_text.GetValue().strip() or None
         
-        if not os.path.exists(ref_audio) or not name:
-            wx.MessageBox(self._("err_bad_preset_name"), self._("error_title"), wx.OK | wx.ICON_ERROR)
+        if not os.path.exists(ref_audio):
+            wx.MessageBox(self._("err_file_not_found"), self._("error_title"), wx.OK | wx.ICON_ERROR)
             return
             
-        def on_success():
-            self.Log(self._("ready"), success=True)
-            self.RefreshPresets()
-            self.preset_name.SetValue("")
-            msg = self._("preset_created_msg").replace("{name}", name)
-            wx.MessageBox(msg, self._("success_title"), wx.OK | wx.ICON_INFORMATION)
+        dlg = wx.TextEntryDialog(self, self._("prompt_preset_name"), self._("preset_name_title"))
+        if dlg.ShowModal() == wx.ID_OK:
+            name = dlg.GetValue().strip()
+            if not name:
+                wx.MessageBox(self._("err_bad_preset_name"), self._("error_title"), wx.OK | wx.ICON_ERROR)
+                dlg.Destroy()
+                return
             
-        self.RunOperation("op_preset_title", "op_preset_msg", self._SavePresetWorker, ref_audio, ref_text, name, success_callback=on_success)
+            def on_success():
+                self.Log(self._("ready"), success=True)
+                self.RefreshPresets()
+                msg = self._("preset_created_msg").replace("{name}", name)
+                if self.cfg.get("confirm_success", False):
+                    wx.MessageBox(msg, self._("success_title"), wx.OK | wx.ICON_INFORMATION)
+                
+            self.RunOperation("op_preset_title", "op_preset_msg", self._SavePresetWorker, ref_audio, ref_text, name, success_callback=on_success)
+        dlg.Destroy()
         
     def _SavePresetWorker(self, op_dialog, ref_audio, ref_text, name):
         try:
@@ -1223,12 +1229,76 @@ class OmniVoiceFrame(wx.Frame):
             if op_dialog.cancel_flag: return
             
             if not name.endswith(".pt"): name += ".pt"
+            if not os.path.exists(PRESETS_DIR):
+                os.makedirs(PRESETS_DIR)
             path = os.path.join(PRESETS_DIR, name)
             prompt.save(path)
             wx.CallAfter(self.Log, f"Preset zapisany: {path}")
         except Exception as e:
             if not op_dialog.cancel_flag:
                 wx.CallAfter(self.Log, self._("msg_error") + str(e))
+                
+    def _CheckDeleteWarning(self, msg):
+        if not self.cfg.get("warn_delete_preset", True):
+            return True
+        dlg = wx.RichMessageDialog(self, msg, self._("warning_title"), wx.YES_NO | wx.ICON_WARNING)
+        dlg.ShowCheckBox(self._("warn_no_show"))
+        res = dlg.ShowModal()
+        if dlg.IsCheckBoxChecked():
+            self.cfg["warn_delete_preset"] = False
+            SaveBasicConfig(self.cfg)
+        return res == wx.ID_YES
+                
+    def OnDelPreset(self, event):
+        idx = self.combo_presets.GetSelection()
+        pt = self.combo_presets.GetClientData(idx)
+        if not pt:
+            wx.MessageBox(self._("msg_no_preset_sel"), self._("error_title"), wx.OK | wx.ICON_ERROR)
+            return
+            
+        name = pt.replace(".pt", "")
+        if not self._CheckDeleteWarning(self._("warn_del_preset").replace("{name}", name)):
+            return
+            
+        path = os.path.join(PRESETS_DIR, pt)
+        if os.path.exists(path):
+            os.remove(path)
+        self.RefreshPresets()
+        
+    def OnDelAllPresets(self, event):
+        if not self._CheckDeleteWarning(self._("warn_del_all")):
+            return
+            
+        if os.path.exists(PRESETS_DIR):
+            for f in os.listdir(PRESETS_DIR):
+                if f.endswith(".pt"):
+                    os.remove(os.path.join(PRESETS_DIR, f))
+        self.RefreshPresets()
+        wx.MessageBox(self._("msg_presets_deleted"), self._("success_title"), wx.OK | wx.ICON_INFORMATION)
+        
+    def OnPresetKeyDown(self, event):
+        keycode = event.GetKeyCode()
+        if keycode == wx.WXK_DELETE:
+            idx = self.combo_presets.GetSelection()
+            pt = self.combo_presets.GetClientData(idx)
+            if not pt:
+                event.Skip()
+                return
+                
+            path = os.path.join(PRESETS_DIR, pt)
+            if event.ShiftDown():
+                # Force delete
+                if os.path.exists(path):
+                    os.remove(path)
+                self.RefreshPresets()
+            else:
+                name = pt.replace(".pt", "")
+                if self._CheckDeleteWarning(self._("warn_del_preset").replace("{name}", name)):
+                    if os.path.exists(path):
+                        os.remove(path)
+                    self.RefreshPresets()
+        else:
+            event.Skip()
 
     def OnPlayAudio(self, event):
         if self.btn_play.GetLabel() == self._("play"):
