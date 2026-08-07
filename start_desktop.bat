@@ -11,7 +11,10 @@ cd /d "%~dp0"
 
 python --version >nul 2>&1
 IF %ERRORLEVEL% NEQ 0 (
-    echo Uwaga, w twoim systemie brakuje Pythona!
+    echo [ERROR] Warning, Python is missing on your system!
+    echo Press ENTER to open the download page or ESCAPE to cancel.
+    echo.
+    echo [BLAD] Uwaga, w twoim systemie brakuje Pythona!
     echo Wcisnij ENTER, by otworzyc strone jego pobierania lub ESCAPE, by anulowac.
     powershell -NoProfile -Command "while(1){$k=[System.Console]::ReadKey(1); if($k.Key -eq 'Enter'){Start-Process 'https://www.python.org/downloads/'; exit 1} elseif($k.Key -eq 'Escape'){exit 0}}"
     exit /b
