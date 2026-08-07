@@ -8,7 +8,7 @@
     "tab_design": "Projektowanie",
     "tab_presets": "Presety Głosów",
     "tab_adv": "Zaawansowane",
-    "tab_auto": "Głos Systemowy (AutoVoice)",
+    "tab_auto": "Losowy Głos",
     "menu_help": "Pomoc",
     "menu_help_tags": "Znaczniki (Laughter itp)",
     "load_model": "Załaduj Model AI",

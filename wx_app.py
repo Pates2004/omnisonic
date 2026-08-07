@@ -313,6 +313,39 @@ def is_model_cached(repo_id):
     except:
         return False
 
+class AccessibleFloatCtrl(wx.TextCtrl):
+    def __init__(self, parent, value, min_val, max_val, inc):
+        super(AccessibleFloatCtrl, self).__init__(parent, value=str(value), style=wx.TE_PROCESS_ENTER)
+        self.min_val = min_val
+        self.max_val = max_val
+        self.inc = inc
+        self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown)
+        
+    def OnKeyDown(self, event):
+        keycode = event.GetKeyCode()
+        if keycode == wx.WXK_UP:
+            self.Increment(self.inc)
+        elif keycode == wx.WXK_DOWN:
+            self.Increment(-self.inc)
+        else:
+            event.Skip()
+            
+    def Increment(self, amount):
+        try:
+            val = float(super(AccessibleFloatCtrl, self).GetValue())
+            val += amount
+            if val < self.min_val: val = self.min_val
+            if val > self.max_val: val = self.max_val
+            self.SetValue(str(round(val, 2)))
+        except ValueError:
+            pass
+
+    def GetValue(self):
+        try:
+            return float(super(AccessibleFloatCtrl, self).GetValue())
+        except ValueError:
+            return self.min_val
+
 class SettingsDialog(wx.Dialog):
     def __init__(self, parent, is_first_run=False, current_cfg=None):
         self.cfg = current_cfg or LoadBasicConfig()
@@ -976,19 +1009,19 @@ class OmniVoiceFrame(wx.Frame):
         lbl_cfg = self._("cfg")
         wx.StaticText(tab, label=lbl_cfg)
         def_cfg = self.cfg.get("ai_cfg", 2.0) if self.cfg.get("remember_ai_settings", True) else 2.0
-        self.spin_cfg = wx.SpinCtrlDouble(tab, value=str(def_cfg), min=0.1, max=10.0, inc=0.1)
+        self.spin_cfg = AccessibleFloatCtrl(tab, value=def_cfg, min_val=0.1, max_val=10.0, inc=0.1)
         self.spin_cfg.SetName(lbl_cfg)
         self.spin_cfg.SetToolTip(lbl_cfg)
-        for child in self.spin_cfg.GetChildren(): child.SetName(lbl_cfg)
+        
         vbox.Add(self.spin_cfg, 0, wx.ALL, 5)
         
         lbl_speed = self._("speed")
         wx.StaticText(tab, label=lbl_speed)
         def_speed = self.cfg.get("ai_speed", 1.0) if self.cfg.get("remember_ai_settings", True) else 1.0
-        self.spin_speed = wx.SpinCtrlDouble(tab, value=str(def_speed), min=0.1, max=5.0, inc=0.1)
+        self.spin_speed = AccessibleFloatCtrl(tab, value=def_speed, min_val=0.1, max_val=5.0, inc=0.1)
         self.spin_speed.SetName(lbl_speed)
         self.spin_speed.SetToolTip(lbl_speed)
-        for child in self.spin_speed.GetChildren(): child.SetName(lbl_speed)
+        
         vbox.Add(self.spin_speed, 0, wx.ALL, 5)
         
         lbl_denoise = self._("denoise")
