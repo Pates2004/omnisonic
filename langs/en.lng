@@ -156,5 +156,15 @@
     "err_file_not_found": "Audio file does not exist!",
     "err_playback": "Playback error: {e}",
     "msg_wait": "Please wait...",
-    "fake_progress_lbl": "Show fake progress bar percentages"
+    "fake_progress_lbl": "Show simulated accessible progress bar",
+    "btn_save_preset_clone": "Save as preset",
+    "prompt_preset_name": "Enter name for the new preset:",
+    "preset_name_title": "Save preset",
+    "btn_del_preset": "Delete preset",
+    "btn_del_all_presets": "Delete all presets",
+    "warn_del_preset": "Are you sure you want to delete preset {name}?\nThis cannot be undone!",
+    "warn_del_all": "Are you sure you want to delete all presets?\nThis cannot be undone!",
+    "warn_no_show": "Do not show this warning again",
+    "msg_no_preset_sel": "No preset selected.",
+    "msg_presets_deleted": "All presets deleted."
 }
