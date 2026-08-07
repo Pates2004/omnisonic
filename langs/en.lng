@@ -125,7 +125,7 @@
     "gen_success_msg": "Done, file successfully generated!",
     "tab_appearance": "Appearance & Language",
     "tab_system": "System & Presets",
-    "tab_ai_opts": "AI Options",
+    "tab_ai_opts": "App Options",
     "preset_disp_lbl": "Preset display style:",
     "disp_name": "Name only",
     "disp_path": "Full path",
