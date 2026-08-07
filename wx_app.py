@@ -453,12 +453,17 @@ class SettingsDialog(wx.Dialog):
             self.cfg["ai_cfg"] = 2.0
             self.cfg["ai_speed"] = 1.0
             self.cfg["ai_denoise"] = True
+            self.cfg["use_duration"] = False
+            self.cfg["duration_val"] = 5.0
             parent = self.GetParent()
             if hasattr(parent, 'spin_steps'):
                 parent.spin_steps.SetValue(32)
                 parent.spin_cfg.SetValue(2.0)
                 parent.spin_speed.SetValue(1.0)
                 parent.chk_denoise.SetValue(True)
+                if hasattr(parent, 'chk_duration'):
+                    parent.chk_duration.SetValue(False)
+                    parent.spin_duration.SetValue(5.0)
             wx.MessageBox(self._("reset_ok"), self._("info_title"), wx.OK | wx.ICON_INFORMATION)
 
     def OnResetApp(self, event):
@@ -477,6 +482,7 @@ class SettingsDialog(wx.Dialog):
             self.chk_confirm_success.SetValue(False)
             self.chk_remember_ai.SetValue(True)
             self.chk_clean_temp.SetValue(True)
+            self.cfg["warn_delete_preset"] = True
             wx.MessageBox(self._("reset_ok"), self._("info_title"), wx.OK | wx.ICON_INFORMATION)
 
     def OnCleanTemp(self, event):
@@ -1062,9 +1068,9 @@ class OmniVoiceFrame(wx.Frame):
                 self.btn_play.SetFocus()
                 wx.Bell()
         
-        self.RunOperation("op_gen_title", "op_gen_msg", self._GenCloneWorker, text, ref_audio, preset_path, ref_text, lang, speed, success_callback=on_success)
+        self.RunOperation("op_gen_title", "op_gen_msg", self._GenCloneWorker, text, ref_audio, preset_path, ref_text, lang, speed, duration, norm_txt, success_callback=on_success)
         
-    def _GenCloneWorker(self, op_dialog, text, ref_audio, preset_path, ref_text, lang, speed):
+    def _GenCloneWorker(self, op_dialog, text, ref_audio, preset_path, ref_text, lang, speed, duration, norm_txt):
         try:
             gen_config = self.GetGenConfig()
             if preset_path:
