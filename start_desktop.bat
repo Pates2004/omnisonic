@@ -9,6 +9,14 @@ echo.
 
 cd /d "%~dp0"
 
+python --version >nul 2>&1
+IF %ERRORLEVEL% NEQ 0 (
+    echo Uwaga, w twoim systemie brakuje Pythona!
+    echo Wcisnij ENTER, by otworzyc strone jego pobierania lub ESCAPE, by anulowac.
+    powershell -NoProfile -Command "while(1){$k=[System.Console]::ReadKey(1); if($k.Key -eq 'Enter'){Start-Process 'https://www.python.org/downloads/'; exit 1} elseif($k.Key -eq 'Escape'){exit 0}}"
+    exit /b
+)
+
 IF NOT EXIST venv (
     echo [INFO] Environment not found. Launching installer UI...
     python install_venv_ui.py
