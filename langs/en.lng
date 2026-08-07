@@ -166,5 +166,7 @@
     "warn_del_all": "Are you sure you want to delete all presets?\nThis cannot be undone!",
     "warn_no_show": "Do not show this warning again",
     "msg_no_preset_sel": "No preset selected.",
-    "msg_presets_deleted": "All presets deleted."
+    "msg_presets_deleted": "All presets deleted.",
+    "dl_model_prompt": "Selected model ({name}) is not downloaded yet. Do you want to download and install it now?",
+    "dl_title": "Downloading model"
 }
