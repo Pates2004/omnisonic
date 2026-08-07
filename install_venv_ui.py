@@ -1,8 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox
-from tkinter import ttk
 import subprocess
-import threading
 import sys
 import os
 
@@ -10,14 +8,13 @@ def install_venv():
     root = tk.Tk()
     root.withdraw()
     
-    if not messagebox.askokcancel("Uwaga - Omnisonic", "Nie wykryto środowiska (venv).\nCzy chcesz pobrać i zainstalować je teraz?"):
+    if not messagebox.askokcancel("Uwaga - Omnisonic", "Nie wykryto środowiska (venv).\nZostanie pobrany moduł instalatora (wxPython), po czym wyświetli się główny instalator.\nCzy chcesz pobrać i zainstalować je teraz?"):
         sys.exit(1)
         
     prog_win = tk.Toplevel(root)
-    prog_win.title("Trwa instalacja środowiska...")
-    prog_win.geometry("400x120")
+    prog_win.title("Pobieranie instalatora...")
+    prog_win.geometry("400x100")
     
-    # Center on screen
     prog_win.update_idletasks()
     width = prog_win.winfo_width()
     height = prog_win.winfo_height()
@@ -25,59 +22,35 @@ def install_venv():
     y = (prog_win.winfo_screenheight() // 2) - (height // 2)
     prog_win.geometry('{}x{}+{}+{}'.format(width, height, x, y))
     
-    lbl = tk.Label(prog_win, text="Trwa pobieranie i instalacja, to może potrwać kilka minut...")
-    lbl.pack(pady=10)
+    lbl = tk.Label(prog_win, text="Trwa tworzenie środowiska i pobieranie instalatora...\nProszę czekać, może to zająć kilka minut.", justify=tk.CENTER)
+    lbl.pack(expand=True, fill=tk.BOTH, padx=20, pady=20)
     
-    progress = ttk.Progressbar(prog_win, mode='indeterminate', length=350)
-    progress.pack(pady=5)
-    progress.start(10)
+    prog_win.update()
     
-    btn_cancel = tk.Button(prog_win, text="Anuluj")
-    btn_cancel.pack(pady=5)
-    
-    cancel_flag = False
-    proc = None
-    
-    def do_cancel():
-        nonlocal cancel_flag
-        if messagebox.askyesno("Uwaga", "Czy na pewno chcesz przerwać instalację?"):
-            cancel_flag = True
-            if proc:
-                try:
-                    proc.kill()
-                except:
-                    pass
-            sys.exit(1)
+    try:
+        if not os.path.exists("venv"):
+            subprocess.run(f'"{sys.executable}" -m venv venv', shell=True, check=True)
             
-    btn_cancel.config(command=do_cancel)
-    prog_win.protocol("WM_DELETE_WINDOW", do_cancel)
-    
-    def worker():
-        nonlocal proc
-        commands = [
-            ("Tworzenie wirtualnego środowiska...", f'"{sys.executable}" -m venv venv'),
-            ("Aktualizacja pip...", r"venv\Scripts\python.exe -m pip install --upgrade pip"),
-            ("Pobieranie PyTorch...", r"venv\Scripts\python.exe -m pip install torch==2.8.0+cu128 torchaudio==2.8.0+cu128 --extra-index-url https://download.pytorch.org/whl/cu128"),
-            ("Instalacja Omnisonic...", r"venv\Scripts\python.exe -m pip install -e ."),
-            ("Pobieranie bibliotek graficznych...", r"venv\Scripts\python.exe -m pip install wxPython sounddevice soundfile numpy")
-        ]
+        pip_path = os.path.join("venv", "Scripts", "python.exe")
+        subprocess.run(f'"{pip_path}" -m pip install --upgrade pip', shell=True, check=True)
+        subprocess.run(f'"{pip_path}" -m pip install wxPython', shell=True, check=True)
         
-        for name, cmd in commands:
-            if cancel_flag: return
-            lbl.config(text=name)
-            try:
-                proc = subprocess.Popen(cmd, shell=True)
-                proc.wait()
-            except Exception as e:
-                pass
-                
-        if not cancel_flag:
-            prog_win.destroy()
-            messagebox.showinfo("Gotowe", "Instalacja środowiska zakończona pomyślnie!\nWciśnij OK, aby uruchomić program.")
-            root.destroy()
-            
-    threading.Thread(target=worker, daemon=True).start()
-    root.mainloop()
+    except Exception as e:
+        prog_win.destroy()
+        messagebox.showerror("Błąd", f"Nie udało się zainstalować środowiska bazowego:\n{e}")
+        root.destroy()
+        sys.exit(1)
+        
+    prog_win.destroy()
+    root.destroy()
+    
+    # Uruchamiamy instalator w wxPython korzystając ze środowiska venv
+    wx_script = "install_venv_ui_wx.py"
+    if os.path.exists(wx_script):
+        ret = subprocess.call(f'"{pip_path}" {wx_script}', shell=True)
+        sys.exit(ret)
+    else:
+        sys.exit(0)
 
 if __name__ == "__main__":
     if not os.path.exists("venv"):

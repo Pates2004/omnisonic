@@ -155,5 +155,6 @@
     "title_save": "Zapis",
     "err_file_not_found": "Plik audio nie istnieje!",
     "err_playback": "Błąd odtwarzania: {e}",
-    "msg_wait": "Proszę czekać..."
+    "msg_wait": "Proszę czekać...",
+    "fake_progress_lbl": "Pokaż sztuczne procenty paska postępu"
 }

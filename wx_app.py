@@ -49,7 +49,7 @@ def LoadLocales():
 LOCALE = LoadLocales()
 
 def LoadBasicConfig():
-    cfg = {"language": "en", "theme": "light", "show_console": False, "close_console_on_exit": True, "force_splash": False, "show_progress": True, "use_native_dialogs": False, "validate_components": False, "first_run_done": False, "font_size": 10, "warn_exit": True, "remember_ai_settings": True, "clean_temp": True, "confirm_success": False, "ai_steps": 32, "ai_cfg": 2.0, "ai_speed": 1.0, "ai_denoise": True}
+    cfg = {"language": "en", "theme": "light", "show_console": False, "close_console_on_exit": True, "force_splash": False, "show_progress": True, "use_native_dialogs": False, "validate_components": False, "first_run_done": False, "font_size": 10, "warn_exit": True, "remember_ai_settings": True, "clean_temp": True, "confirm_success": False, "ai_steps": 32, "ai_cfg": 2.0, "ai_speed": 1.0, "ai_denoise": True, "fake_progress_numbers": False}
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -121,7 +121,7 @@ class StartupSplash:
             self.dialog.Centre()
             
             timer = wx.Timer(self.dialog)
-            self.dialog.Bind(wx.EVT_TIMER, lambda e: gauge.SetValue((gauge.GetValue() + 5) % 101), timer)
+            self.dialog.Bind(wx.EVT_TIMER, lambda e: gauge.SetValue((gauge.GetValue() + 5) % 101) if self.cfg.get("fake_progress_numbers", False) else gauge.Pulse(), timer)
             timer.Start(100)
             
             threading.Thread(target=self.DoHeavyImports, daemon=True).start()
@@ -219,7 +219,7 @@ class OperationDialog:
             self.dialog.Centre()
             
             timer = wx.Timer(self.dialog)
-            self.dialog.Bind(wx.EVT_TIMER, lambda e: gauge.SetValue((gauge.GetValue() + 5) % 101), timer)
+            self.dialog.Bind(wx.EVT_TIMER, lambda e: gauge.SetValue((gauge.GetValue() + 5) % 101) if self.cfg.get("fake_progress_numbers", False) else gauge.Pulse(), timer)
             timer.Start(100)
             
             threading.Thread(target=self._run_thread_custom, daemon=True).start()
@@ -275,7 +275,12 @@ class DownloadDialog(wx.Dialog):
         self.t.start()
 
     def OnTimer(self, event):
-        self.gauge.Pulse()
+        app = wx.GetApp()
+        cfg = app.GetTopWindow().cfg if app and app.GetTopWindow() and hasattr(app.GetTopWindow(), "cfg") else {}
+        if cfg.get("fake_progress_numbers", False):
+            self.gauge.SetValue((self.gauge.GetValue() + 5) % 101)
+        else:
+            self.gauge.Pulse()
         if not self.t.is_alive() and not self.cancel_flag:
             self.EndModal(wx.ID_OK)
 
@@ -389,6 +394,10 @@ class SettingsDialog(wx.Dialog):
             self.chk_show_progress.SetValue(self.cfg.get("show_progress", True))
             vbox_opts.Add(self.chk_show_progress, 0, wx.ALL | wx.EXPAND, 5)
             
+            self.chk_fake_progress = wx.CheckBox(tab_opts, label=self._("fake_progress_lbl"))
+            self.chk_fake_progress.SetValue(self.cfg.get("fake_progress_numbers", False))
+            vbox_opts.Add(self.chk_fake_progress, 0, wx.ALL | wx.EXPAND, 5)
+            
             self.chk_use_native = wx.CheckBox(tab_opts, label=self._("use_native_dialogs_lbl"))
             self.chk_use_native.SetValue(self.cfg.get("use_native_dialogs", False))
             vbox_opts.Add(self.chk_use_native, 0, wx.ALL | wx.EXPAND, 5)
@@ -461,6 +470,7 @@ class SettingsDialog(wx.Dialog):
             self.chk_close_console.SetValue(True)
             self.chk_force_splash.SetValue(False)
             self.chk_show_progress.SetValue(True)
+            self.chk_fake_progress.SetValue(False)
             self.chk_use_native.SetValue(False)
             self.chk_validate.SetValue(False)
             self.chk_warn_exit.SetValue(True)
@@ -504,6 +514,7 @@ class SettingsDialog(wx.Dialog):
             self.cfg["preset_display_mode"] = "name" if idx == 0 else ("path" if idx == 1 else "name_path")
             self.cfg["force_splash"] = self.chk_force_splash.GetValue()
             self.cfg["show_progress"] = self.chk_show_progress.GetValue()
+            self.cfg["fake_progress_numbers"] = self.chk_fake_progress.GetValue()
             self.cfg["use_native_dialogs"] = self.chk_use_native.GetValue()
             self.cfg["validate_components"] = self.chk_validate.GetValue()
             self.cfg["warn_exit"] = self.chk_warn_exit.GetValue()
@@ -677,7 +688,10 @@ class OmniVoiceFrame(wx.Frame):
         self.RefreshPresets()
 
     def OnProgTimer(self, event):
-        self.gauge.SetValue((self.gauge.GetValue() + 2) % 101)
+        if self.cfg.get("fake_progress_numbers", False):
+            self.gauge.SetValue((self.gauge.GetValue() + 2) % 101)
+        else:
+            self.gauge.Pulse()
 
     def OnStopOperation(self, event):
         if self.current_op:
