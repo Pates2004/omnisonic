@@ -649,17 +649,14 @@ class OmniVoiceFrame(wx.Frame):
         self.notebook = wx.Notebook(self.panel)
         self.tab_clone = wx.Panel(self.notebook)
         self.tab_design = wx.Panel(self.notebook)
-        self.tab_presets = wx.Panel(self.notebook)
         self.tab_adv = wx.Panel(self.notebook)
         
         self.notebook.AddPage(self.tab_clone, self._("tab_clone"))
         self.notebook.AddPage(self.tab_design, self._("tab_design"))
-        self.notebook.AddPage(self.tab_presets, self._("tab_presets"))
         self.notebook.AddPage(self.tab_adv, self._("tab_adv"))
         
         self.SetupCloneTab(self.tab_clone)
         self.SetupDesignTab(self.tab_design)
-        self.SetupPresetsTab(self.tab_presets)
         self.SetupAdvTab(self.tab_adv)
         
         self.main_vbox.Add(self.notebook, 1, wx.EXPAND | wx.ALL, 5)
