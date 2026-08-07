@@ -155,5 +155,6 @@
     "title_save": "Save",
     "err_file_not_found": "Audio file does not exist!",
     "err_playback": "Playback error: {e}",
-    "msg_wait": "Please wait..."
+    "msg_wait": "Please wait...",
+    "fake_progress_lbl": "Show fake progress bar percentages"
 }
