@@ -964,6 +964,19 @@ class OmniVoiceFrame(wx.Frame):
         menubar = wx.MenuBar()
         progMenu = wx.Menu()
 
+        self.item_open_reference = progMenu.Append(
+            wx.ID_OPEN, f"{self._('menu_open_reference')}\tCtrl+O"
+        )
+        self.Bind(wx.EVT_MENU, self.OnShortcutOpen, self.item_open_reference)
+
+        self.item_generate = progMenu.Append(wx.ID_ANY, f"{self._('menu_generate')}\tCtrl+G")
+        self.Bind(wx.EVT_MENU, self.OnShortcutGenerate, self.item_generate)
+
+        self.item_save_result = progMenu.Append(wx.ID_SAVE, f"{self._('menu_save_result')}\tCtrl+S")
+        self.Bind(wx.EVT_MENU, self.OnShortcutSave, self.item_save_result)
+        self.item_save_result.Enable(False)
+
+        progMenu.AppendSeparator()
         self.item_settings = progMenu.Append(wx.ID_ANY, self._("menu_settings"))
         self.Bind(wx.EVT_MENU, self.OnOpenSettings, self.item_settings)
 
@@ -978,6 +991,15 @@ class OmniVoiceFrame(wx.Frame):
         menubar.Append(helpMenu, self._("menu_help"))
 
         self.SetMenuBar(menubar)
+        self.SetAcceleratorTable(
+            wx.AcceleratorTable(
+                [
+                    (wx.ACCEL_CTRL, ord("O"), self.item_open_reference.GetId()),
+                    (wx.ACCEL_CTRL, ord("G"), self.item_generate.GetId()),
+                    (wx.ACCEL_CTRL, ord("S"), self.item_save_result.GetId()),
+                ]
+            )
+        )
 
         self.panel = wx.Panel(self)
         self.main_vbox = wx.BoxSizer(wx.VERTICAL)
@@ -1054,6 +1076,32 @@ class OmniVoiceFrame(wx.Frame):
         else:
             self.gauge.Pulse()
 
+    def OnShortcutOpen(self, event):
+        self.notebook.SetSelection(0)
+        self.OnBrowseRefAudio(event)
+
+    def OnShortcutGenerate(self, event):
+        page = self.notebook.GetCurrentPage()
+        actions = (
+            (self.tab_clone, self.btn_gen_clone, self.OnGenClone),
+            (self.tab_design, self.btn_gen_design, self.OnGenDesign),
+            (self.tab_auto, self.btn_gen_auto, self.OnGenAuto),
+        )
+        for target_page, button, handler in actions:
+            if page is target_page:
+                if button.IsEnabled():
+                    handler(event)
+                else:
+                    wx.Bell()
+                return
+        wx.Bell()
+
+    def OnShortcutSave(self, event):
+        if self.audio_data is None:
+            wx.Bell()
+            return
+        self.OnSaveAudio(event)
+
     def OnStopOperation(self, event):
         if self.current_op and not self.current_op.finished:
             dlg = wx.MessageDialog(
@@ -1079,6 +1127,8 @@ class OmniVoiceFrame(wx.Frame):
                 control.Enable(enabled)
         if hasattr(self, "item_settings"):
             self.item_settings.Enable(enabled)
+        if hasattr(self, "item_generate"):
+            self.item_generate.Enable(enabled)
 
     def _complete_operation(self, state, success_callback):
         if state.error is not None:
@@ -1542,6 +1592,7 @@ class OmniVoiceFrame(wx.Frame):
         self.audio_data = None
         self.btn_play.Disable()
         self.btn_save.Disable()
+        self.item_save_result.Enable(False)
 
     def _finish_generation(self, audio):
         audio_array = np.asarray(audio)
@@ -1551,6 +1602,7 @@ class OmniVoiceFrame(wx.Frame):
         self.Log(self._("ready"), success=True)
         self.btn_play.Enable()
         self.btn_save.Enable()
+        self.item_save_result.Enable()
         self.btn_play.SetFocus()
         wx.Bell()
         if self.cfg.get("auto_save_gen", False):

@@ -116,6 +116,8 @@ class LocaleTests(unittest.TestCase):
         self.assertIn("pl", locales)
         self.assertEqual(missing_keys(locales)["pl"], set())
         self.assertEqual(translate(locales, "pl", "title"), "OmniSonic")
+        self.assertEqual(translate(locales, "pl", "menu_help_tags"), "Lista znaczników głosu")
+        self.assertEqual(translate(locales, "en", "menu_help_tags"), "Voice tag list")
 
     def test_locale_placeholders_and_unicode_are_consistent(self):
         _root, locales = self._load_project_locales()
