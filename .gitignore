@@ -30,4 +30,7 @@ examples/exp*
 *.wav
 *.jsonl
 settings.json
-start.bat
+start.bat 
+# Custom configs
+/presets/
+/env/
