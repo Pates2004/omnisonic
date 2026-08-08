@@ -49,6 +49,36 @@ class ConfigTests(unittest.TestCase):
         self.assertIs(result["show_progress"], DEFAULT_CONFIG["show_progress"])
         self.assertNotIn("obsolete_option", result)
 
+    def test_normalize_config_repairs_full_generation_settings(self):
+        result = normalize_config(
+            {
+                "ai_t_shift": 0,
+                "ai_layer_penalty_factor": -1,
+                "ai_position_temperature": 1000,
+                "ai_class_temperature": "bad",
+                "ai_audio_chunk_duration": -5,
+                "ai_audio_chunk_threshold": 9999,
+                "ai_pad_duration": -1,
+                "ai_fade_duration": 99,
+                "ai_preprocess_prompt": "yes",
+                "ai_postprocess_output": None,
+                "clone_instruct": 123,
+                "design_instruct": ["whisper"],
+            }
+        )
+        self.assertEqual(result["ai_t_shift"], 0.001)
+        self.assertEqual(result["ai_layer_penalty_factor"], 0.0)
+        self.assertEqual(result["ai_position_temperature"], 100.0)
+        self.assertEqual(result["ai_class_temperature"], 0.0)
+        self.assertEqual(result["ai_audio_chunk_duration"], 0.0)
+        self.assertEqual(result["ai_audio_chunk_threshold"], 3600.0)
+        self.assertEqual(result["ai_pad_duration"], 0.0)
+        self.assertEqual(result["ai_fade_duration"], 10.0)
+        self.assertTrue(result["ai_preprocess_prompt"])
+        self.assertTrue(result["ai_postprocess_output"])
+        self.assertEqual(result["clone_instruct"], "")
+        self.assertEqual(result["design_instruct"], "")
+
     def test_config_round_trip_is_valid_json(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "settings.json"
@@ -224,6 +254,90 @@ class LocaleTests(unittest.TestCase):
         used_keys.update(f"cat_{category}" for category in categories)
         used_keys.update(f"val_{value}" for values in categories.values() for value in values)
         self.assertEqual(used_keys - set(locales["en"]), set())
+
+
+class DesktopSourceTests(unittest.TestCase):
+    @staticmethod
+    def _app_tree():
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "omnisonic" / "app.py").read_text(encoding="utf-8")
+        return source, ast.parse(source)
+
+    def test_reference_audio_picker_exposes_supported_formats(self):
+        _source, tree = self._app_tree()
+        wildcard = None
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "_AUDIO_FILE_WILDCARD"
+                for target in node.targets
+            ):
+                wildcard = ast.literal_eval(node.value).lower()
+                break
+        self.assertIsNotNone(wildcard)
+        for extension in ("*.wav", "*.flac", "*.ogg", "*.opus", "*.mp3", "*.aiff", "*.caf"):
+            with self.subTest(extension=extension):
+                self.assertIn(extension, wildcard)
+
+    def test_clone_tab_has_no_preset_delete_binding(self):
+        _source, tree = self._app_tree()
+        frame = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "OmniVoiceFrame"
+        )
+        clone_setup = next(
+            node
+            for node in frame.body
+            if isinstance(node, ast.FunctionDef) and node.name == "SetupCloneTab"
+        )
+        called_handlers = {
+            argument.attr
+            for node in ast.walk(clone_setup)
+            if isinstance(node, ast.Call)
+            for argument in node.args
+            if isinstance(argument, ast.Attribute)
+        }
+        self.assertNotIn("OnDelPreset", called_handlers)
+        self.assertNotIn("OnDelAllPresets", called_handlers)
+        self.assertNotIn("OnPresetManagerKeyDown", called_handlers)
+
+    def test_gui_forwards_every_generation_config_field(self):
+        _source, tree = self._app_tree()
+        frame = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "OmniVoiceFrame"
+        )
+        get_config = next(
+            node
+            for node in frame.body
+            if isinstance(node, ast.FunctionDef) and node.name == "GetGenConfig"
+        )
+        constructor = next(
+            node
+            for node in ast.walk(get_config)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "OmniVoiceGenerationConfig"
+        )
+        self.assertEqual(
+            {keyword.arg for keyword in constructor.keywords},
+            {
+                "num_step",
+                "guidance_scale",
+                "t_shift",
+                "layer_penalty_factor",
+                "position_temperature",
+                "class_temperature",
+                "denoise",
+                "preprocess_prompt",
+                "postprocess_output",
+                "audio_chunk_duration",
+                "audio_chunk_threshold",
+                "pad_duration",
+                "fade_duration",
+            },
+        )
 
 
 if __name__ == "__main__":

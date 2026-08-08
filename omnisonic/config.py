@@ -77,6 +77,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ai_cfg": 2.0,
     "ai_speed": 1.0,
     "ai_denoise": True,
+    "ai_t_shift": 0.1,
+    "ai_layer_penalty_factor": 5.0,
+    "ai_position_temperature": 5.0,
+    "ai_class_temperature": 0.0,
+    "ai_preprocess_prompt": True,
+    "ai_postprocess_output": True,
+    "ai_audio_chunk_duration": 15.0,
+    "ai_audio_chunk_threshold": 30.0,
+    "ai_pad_duration": 0.1,
+    "ai_fade_duration": 0.1,
     "fake_progress_numbers": False,
     "preset_display_mode": "name",
     "asr_model_name": "openai/whisper-large-v3-turbo",
@@ -85,7 +95,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "use_duration": False,
     "duration_val": 5.0,
     "clone_lang": "Auto",
+    "clone_instruct": "",
     "design_lang": "Auto",
+    "design_instruct": "",
     "auto_lang": "Auto",
     "warn_delete_preset": True,
     "auto_save_gen": False,
@@ -123,6 +135,24 @@ def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     result["ai_steps"] = int(_clamp_number(result.get("ai_steps"), 32, 1, 100))
     result["ai_cfg"] = _clamp_number(result.get("ai_cfg"), 2.0, 0.1, 10.0)
     result["ai_speed"] = _clamp_number(result.get("ai_speed"), 1.0, 0.1, 5.0)
+    result["ai_t_shift"] = _clamp_number(result.get("ai_t_shift"), 0.1, 0.001, 10.0)
+    result["ai_layer_penalty_factor"] = _clamp_number(
+        result.get("ai_layer_penalty_factor"), 5.0, 0.0, 100.0
+    )
+    result["ai_position_temperature"] = _clamp_number(
+        result.get("ai_position_temperature"), 5.0, 0.0, 100.0
+    )
+    result["ai_class_temperature"] = _clamp_number(
+        result.get("ai_class_temperature"), 0.0, 0.0, 100.0
+    )
+    result["ai_audio_chunk_duration"] = _clamp_number(
+        result.get("ai_audio_chunk_duration"), 15.0, 0.0, 3600.0
+    )
+    result["ai_audio_chunk_threshold"] = _clamp_number(
+        result.get("ai_audio_chunk_threshold"), 30.0, 0.0, 3600.0
+    )
+    result["ai_pad_duration"] = _clamp_number(result.get("ai_pad_duration"), 0.1, 0.0, 10.0)
+    result["ai_fade_duration"] = _clamp_number(result.get("ai_fade_duration"), 0.1, 0.0, 10.0)
     result["duration_val"] = _clamp_number(result.get("duration_val"), 5.0, 0.1, 100.0)
 
     if result.get("theme") not in {"light", "dark"}:
@@ -134,6 +164,9 @@ def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
             result[key] = DEFAULT_CONFIG[key]
         else:
             result[key] = result[key].strip()
+    for key in ("clone_instruct", "design_instruct"):
+        if not isinstance(result.get(key), str):
+            result[key] = ""
 
     raw_bindings = result.get("shortcut_bindings")
     if not isinstance(raw_bindings, Mapping):
