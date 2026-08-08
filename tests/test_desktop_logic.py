@@ -72,7 +72,7 @@ class ValidationTests(unittest.TestCase):
     def test_safe_child_path_cannot_escape(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            self.assertEqual(safe_child_path(root, "voice.pt"), root / "voice.pt")
+            self.assertEqual(safe_child_path(root, "voice.pt"), root.resolve() / "voice.pt")
             with self.assertRaises(ValueError):
                 safe_child_path(root, "../outside.pt")
 
