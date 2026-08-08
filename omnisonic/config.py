@@ -8,8 +8,16 @@ import os
 import shutil
 import sys
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
+
+from .shortcuts import (
+    SHORTCUT_DEFINITIONS,
+    default_shortcut_bindings,
+    default_shortcut_enabled,
+    normalize_shortcut,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +94,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "auto_save_rec": False,
     "auto_save_rec_folder": False,
     "prefix_rec": "record",
+    "shortcuts_enabled": True,
+    "shortcut_bindings": default_shortcut_bindings(),
+    "shortcut_enabled": default_shortcut_enabled(),
 }
 
 
@@ -98,9 +109,9 @@ def _clamp_number(value: Any, default: float, minimum: float, maximum: float) ->
 
 def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     """Merge persisted values with defaults and validate important fields."""
-    result = DEFAULT_CONFIG.copy()
+    result = deepcopy(DEFAULT_CONFIG)
     if config:
-        result.update({key: config[key] for key in DEFAULT_CONFIG if key in config})
+        result.update({key: deepcopy(config[key]) for key in DEFAULT_CONFIG if key in config})
         if "hide_console" not in config and isinstance(config.get("show_console"), bool):
             result["hide_console"] = not config["show_console"]
 
@@ -123,13 +134,33 @@ def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
             result[key] = DEFAULT_CONFIG[key]
         else:
             result[key] = result[key].strip()
+
+    raw_bindings = result.get("shortcut_bindings")
+    if not isinstance(raw_bindings, Mapping):
+        raw_bindings = {}
+    raw_enabled = result.get("shortcut_enabled")
+    if not isinstance(raw_enabled, Mapping):
+        raw_enabled = {}
+    bindings: dict[str, str] = {}
+    enabled: dict[str, bool] = {}
+    for definition in SHORTCUT_DEFINITIONS:
+        try:
+            bindings[definition.key] = normalize_shortcut(
+                raw_bindings.get(definition.key, definition.default)
+            )
+        except ValueError:
+            bindings[definition.key] = definition.default
+        shortcut_enabled = raw_enabled.get(definition.key, True)
+        enabled[definition.key] = shortcut_enabled if isinstance(shortcut_enabled, bool) else True
+    result["shortcut_bindings"] = bindings
+    result["shortcut_enabled"] = enabled
     return result
 
 
 def load_config(path: Path | str = CONFIG_FILE) -> dict[str, Any]:
     path = Path(path)
     if not path.exists():
-        return DEFAULT_CONFIG.copy()
+        return deepcopy(DEFAULT_CONFIG)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
@@ -137,7 +168,7 @@ def load_config(path: Path | str = CONFIG_FILE) -> dict[str, Any]:
         return normalize_config(data)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         logger.warning("Could not load configuration from %s: %s", path, exc)
-        return DEFAULT_CONFIG.copy()
+        return deepcopy(DEFAULT_CONFIG)
 
 
 def save_config(config: Mapping[str, Any], path: Path | str = CONFIG_FILE) -> None:

@@ -20,6 +20,14 @@ from .config import (
 )
 from .i18n import load_locales, translate
 from .operations import OperationState, execute_worker
+from .shortcuts import (
+    SHORTCUT_DEFINITIONS,
+    default_shortcut_bindings,
+    default_shortcut_enabled,
+    find_shortcut_conflicts,
+    normalize_shortcut,
+    shortcut_parts,
+)
 from .validation import preset_filename, safe_child_path, validate_filename_component
 
 torch = None
@@ -77,6 +85,80 @@ def LoadBasicConfig():
 
 def SaveBasicConfig(cfg):
     save_config(cfg, CONFIG_FILE)
+
+
+def SetConsoleVisible(visible):
+    if not hasattr(ctypes, "windll"):
+        return False
+    window = ctypes.windll.kernel32.GetConsoleWindow()
+    if not window:
+        return False
+    ctypes.windll.user32.ShowWindow(window, 5 if visible else 0)
+    return True
+
+
+_SHORTCUT_WX_KEYS = {
+    "Space": wx.WXK_SPACE,
+    "Enter": wx.WXK_RETURN,
+    "Tab": wx.WXK_TAB,
+    "Escape": wx.WXK_ESCAPE,
+    "Backspace": wx.WXK_BACK,
+    "Delete": wx.WXK_DELETE,
+    "Insert": wx.WXK_INSERT,
+    "Home": wx.WXK_HOME,
+    "End": wx.WXK_END,
+    "PageUp": wx.WXK_PAGEUP,
+    "PageDown": wx.WXK_PAGEDOWN,
+    "Up": wx.WXK_UP,
+    "Down": wx.WXK_DOWN,
+    "Left": wx.WXK_LEFT,
+    "Right": wx.WXK_RIGHT,
+}
+_SHORTCUT_WX_KEYS_REVERSED = {value: key for key, value in _SHORTCUT_WX_KEYS.items()}
+
+
+def _wx_accelerator(shortcut, command_id):
+    modifiers, key = shortcut_parts(shortcut)
+    flags = wx.ACCEL_NORMAL
+    if "Ctrl" in modifiers:
+        flags |= wx.ACCEL_CTRL
+    if "Alt" in modifiers:
+        flags |= wx.ACCEL_ALT
+    if "Shift" in modifiers:
+        flags |= wx.ACCEL_SHIFT
+
+    if len(key) == 1:
+        key_code = ord(key)
+    elif key.startswith("F") and key[1:].isdigit():
+        key_code = getattr(wx, f"WXK_F{int(key[1:])}")
+    else:
+        key_code = _SHORTCUT_WX_KEYS[key]
+    return flags, key_code, command_id
+
+
+def _shortcut_from_key_event(event):
+    key_code = event.GetKeyCode()
+    if event.ControlDown() and 1 <= key_code <= 26:
+        key_code += ord("A") - 1
+
+    if key_code in _SHORTCUT_WX_KEYS_REVERSED:
+        key = _SHORTCUT_WX_KEYS_REVERSED[key_code]
+    elif wx.WXK_F1 <= key_code <= wx.WXK_F24:
+        key = f"F{key_code - wx.WXK_F1 + 1}"
+    elif 0 <= key_code < 256 and chr(key_code).isascii() and chr(key_code).isalnum():
+        key = chr(key_code).upper()
+    else:
+        raise ValueError("unsupported key")
+
+    parts = []
+    if event.ControlDown():
+        parts.append("Ctrl")
+    if event.AltDown():
+        parts.append("Alt")
+    if event.ShiftDown():
+        parts.append("Shift")
+    parts.append(key)
+    return normalize_shortcut("+".join(parts))
 
 
 def LoadRuntimeDependencies():
@@ -440,6 +522,45 @@ class AccessibleFloatCtrl(wx.TextCtrl):
             return self.min_val
 
 
+class ShortcutCaptureDialog(wx.Dialog):
+    def __init__(self, parent, translate_func):
+        super().__init__(parent, title=translate_func("shortcut_capture_title"), size=(500, 210))
+        self._ = translate_func
+        self.captured_shortcut = None
+
+        panel = wx.Panel(self)
+        layout = wx.BoxSizer(wx.VERTICAL)
+        self.instructions = wx.StaticText(panel, label=self._("shortcut_capture_prompt"))
+        self.instructions.SetName(self._("shortcut_capture_prompt"))
+        layout.Add(self.instructions, 1, wx.ALL | wx.EXPAND, 15)
+
+        cancel_button = wx.Button(panel, wx.ID_CANCEL, self._("btn_cancel"))
+        layout.Add(cancel_button, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL, 10)
+        panel.SetSizer(layout)
+
+        self.Bind(wx.EVT_CHAR_HOOK, self.OnKey)
+        self.CentreOnParent()
+
+    def OnKey(self, event):
+        if event.GetKeyCode() in (wx.WXK_CONTROL, wx.WXK_ALT, wx.WXK_SHIFT):
+            return
+        if (
+            event.GetKeyCode() == wx.WXK_ESCAPE
+            and not event.ControlDown()
+            and not event.AltDown()
+            and not event.ShiftDown()
+        ):
+            self.EndModal(wx.ID_CANCEL)
+            return
+        try:
+            self.captured_shortcut = _shortcut_from_key_event(event)
+        except ValueError:
+            self.instructions.SetLabel(self._("shortcut_capture_invalid"))
+            self.instructions.GetParent().Layout()
+            return
+        self.EndModal(wx.ID_OK)
+
+
 class SettingsDialog(wx.Dialog):
     def __init__(self, parent, is_first_run=False, current_cfg=None):
         self.cfg = current_cfg or LoadBasicConfig()
@@ -469,8 +590,10 @@ class SettingsDialog(wx.Dialog):
         if not self.is_first_run:
             tab_sys = scrolled.ScrolledPanel(notebook)
             tab_opts = scrolled.ScrolledPanel(notebook)
+            tab_shortcuts = scrolled.ScrolledPanel(notebook)
             notebook.AddPage(tab_sys, self._("tab_system"))
             notebook.AddPage(tab_opts, self._("tab_ai_opts"))
+            notebook.AddPage(tab_shortcuts, self._("tab_shortcuts"))
 
         vbox_app = wx.BoxSizer(wx.VERTICAL)
         label = wx.StaticText(tab_app, label=self._("lang_lbl"))
@@ -659,6 +782,7 @@ class SettingsDialog(wx.Dialog):
             vbox_opts.Add(hbox_reset, 0, wx.ALL | wx.EXPAND, 5)
             tab_opts.SetSizer(vbox_opts)
             tab_opts.SetupScrolling(scroll_x=False)
+            self.SetupShortcutsTab(tab_shortcuts)
 
         vbox_main.Add(notebook, 1, wx.EXPAND | wx.ALL, 5)
 
@@ -676,6 +800,167 @@ class SettingsDialog(wx.Dialog):
 
         panel.SetSizer(vbox_main)
         self.Bind(wx.EVT_CLOSE, self.OnClose)
+
+    def SetupShortcutsTab(self, tab):
+        self.shortcut_bindings = dict(
+            self.cfg.get("shortcut_bindings", default_shortcut_bindings())
+        )
+        self.shortcut_enabled = dict(self.cfg.get("shortcut_enabled", default_shortcut_enabled()))
+        self._updating_shortcut_editor = False
+
+        layout = wx.BoxSizer(wx.VERTICAL)
+        self.chk_shortcuts_enabled = wx.CheckBox(tab, label=self._("shortcuts_global_enabled"))
+        self.chk_shortcuts_enabled.SetName(self._("shortcuts_global_enabled"))
+        self.chk_shortcuts_enabled.SetValue(self.cfg.get("shortcuts_enabled", True))
+        layout.Add(self.chk_shortcuts_enabled, 0, wx.ALL | wx.EXPAND, 5)
+
+        list_label = wx.StaticText(tab, label=self._("shortcuts_list_label"))
+        layout.Add(list_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
+        self.list_shortcuts = wx.ListBox(tab, choices=[])
+        self.list_shortcuts.SetName(self._("shortcuts_list_label"))
+        for index in range(len(SHORTCUT_DEFINITIONS)):
+            self.list_shortcuts.Append(self._shortcut_list_text(index))
+        self.list_shortcuts.Bind(wx.EVT_LISTBOX, self.OnShortcutSelected)
+        layout.Add(self.list_shortcuts, 1, wx.ALL | wx.EXPAND, 5)
+
+        self.chk_shortcut_enabled = wx.CheckBox(tab, label=self._("shortcut_item_enabled"))
+        self.chk_shortcut_enabled.SetName(self._("shortcut_item_enabled"))
+        self.chk_shortcut_enabled.Bind(wx.EVT_CHECKBOX, self.OnShortcutEnabledChanged)
+        layout.Add(self.chk_shortcut_enabled, 0, wx.ALL | wx.EXPAND, 5)
+
+        editor_label = wx.StaticText(tab, label=self._("shortcut_value_label"))
+        layout.Add(editor_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
+        editor_row = wx.BoxSizer(wx.HORIZONTAL)
+        self.txt_shortcut = wx.TextCtrl(tab)
+        self.txt_shortcut.SetName(self._("shortcut_value_label"))
+        self.txt_shortcut.Bind(wx.EVT_TEXT, self.OnShortcutTextChanged)
+        editor_row.Add(self.txt_shortcut, 1, wx.EXPAND | wx.RIGHT, 5)
+
+        capture_button = wx.Button(tab, label=self._("shortcut_capture_button"))
+        capture_button.Bind(wx.EVT_BUTTON, self.OnCaptureShortcut)
+        editor_row.Add(capture_button, 0, wx.EXPAND | wx.RIGHT, 5)
+
+        restore_button = wx.Button(tab, label=self._("shortcuts_restore_defaults"))
+        restore_button.Bind(wx.EVT_BUTTON, self.OnRestoreShortcutDefaults)
+        editor_row.Add(restore_button, 0, wx.EXPAND)
+        layout.Add(editor_row, 0, wx.ALL | wx.EXPAND, 5)
+
+        help_text = wx.StaticText(tab, label=self._("shortcut_format_help"))
+        help_text.Wrap(560)
+        layout.Add(help_text, 0, wx.ALL | wx.EXPAND, 5)
+
+        tab.SetSizer(layout)
+        tab.SetupScrolling(scroll_x=False)
+        self.list_shortcuts.SetSelection(0)
+        self._load_selected_shortcut()
+
+    def _shortcut_list_text(self, index):
+        definition = SHORTCUT_DEFINITIONS[index]
+        binding = self.shortcut_bindings.get(definition.key, definition.default)
+        state_key = (
+            "shortcut_state_enabled"
+            if self.shortcut_enabled.get(definition.key, True)
+            else "shortcut_state_disabled"
+        )
+        return f"{self._(definition.label_key)}: {binding} — {self._(state_key)}"
+
+    def _selected_shortcut(self):
+        index = self.list_shortcuts.GetSelection()
+        if index == wx.NOT_FOUND:
+            return None, None
+        return index, SHORTCUT_DEFINITIONS[index]
+
+    def _refresh_shortcut_list_item(self, index):
+        selection = self.list_shortcuts.GetSelection()
+        self.list_shortcuts.SetString(index, self._shortcut_list_text(index))
+        self.list_shortcuts.SetSelection(selection)
+
+    def _load_selected_shortcut(self):
+        _index, definition = self._selected_shortcut()
+        if definition is None:
+            return
+        self._updating_shortcut_editor = True
+        self.txt_shortcut.SetValue(self.shortcut_bindings.get(definition.key, definition.default))
+        self.chk_shortcut_enabled.SetValue(self.shortcut_enabled.get(definition.key, True))
+        self._updating_shortcut_editor = False
+
+    def OnShortcutSelected(self, event):
+        self._load_selected_shortcut()
+
+    def OnShortcutTextChanged(self, event):
+        if self._updating_shortcut_editor:
+            return
+        index, definition = self._selected_shortcut()
+        if definition is None:
+            return
+        self.shortcut_bindings[definition.key] = self.txt_shortcut.GetValue().strip()
+        self._refresh_shortcut_list_item(index)
+
+    def OnShortcutEnabledChanged(self, event):
+        if self._updating_shortcut_editor:
+            return
+        index, definition = self._selected_shortcut()
+        if definition is None:
+            return
+        self.shortcut_enabled[definition.key] = self.chk_shortcut_enabled.GetValue()
+        self._refresh_shortcut_list_item(index)
+
+    def OnCaptureShortcut(self, event):
+        dialog = ShortcutCaptureDialog(self, self._)
+        if dialog.ShowModal() == wx.ID_OK and dialog.captured_shortcut:
+            self.txt_shortcut.SetValue(dialog.captured_shortcut)
+            self.txt_shortcut.SetFocus()
+        dialog.Destroy()
+
+    def _restore_shortcut_defaults(self):
+        self.shortcut_bindings = default_shortcut_bindings()
+        self.shortcut_enabled = default_shortcut_enabled()
+        self.chk_shortcuts_enabled.SetValue(True)
+        for index in range(len(SHORTCUT_DEFINITIONS)):
+            self._refresh_shortcut_list_item(index)
+        self._load_selected_shortcut()
+
+    def OnRestoreShortcutDefaults(self, event):
+        self._restore_shortcut_defaults()
+
+    def _save_shortcut_settings(self):
+        normalized_bindings = {}
+        for definition in SHORTCUT_DEFINITIONS:
+            try:
+                normalized_bindings[definition.key] = normalize_shortcut(
+                    self.shortcut_bindings.get(definition.key, definition.default)
+                )
+            except ValueError:
+                wx.MessageBox(
+                    self._("shortcut_invalid").format(name=self._(definition.label_key)),
+                    self._("error_title"),
+                    wx.OK | wx.ICON_ERROR,
+                )
+                return False
+
+        conflicts = find_shortcut_conflicts(normalized_bindings, self.shortcut_enabled)
+        if conflicts:
+            first, second, shortcut = conflicts[0]
+            definitions = {definition.key: definition for definition in SHORTCUT_DEFINITIONS}
+            wx.MessageBox(
+                self._("shortcut_conflict").format(
+                    first=self._(definitions[first].label_key),
+                    second=self._(definitions[second].label_key),
+                    shortcut=shortcut,
+                ),
+                self._("error_title"),
+                wx.OK | wx.ICON_ERROR,
+            )
+            return False
+
+        self.shortcut_bindings = normalized_bindings
+        self.cfg["shortcuts_enabled"] = self.chk_shortcuts_enabled.GetValue()
+        self.cfg["shortcut_bindings"] = dict(normalized_bindings)
+        self.cfg["shortcut_enabled"] = {
+            definition.key: self.shortcut_enabled.get(definition.key, True)
+            for definition in SHORTCUT_DEFINITIONS
+        }
+        return True
 
     def OnResetAI(self, event):
         if (
@@ -737,6 +1022,7 @@ class SettingsDialog(wx.Dialog):
             self.chk_auto_rec_folder.SetValue(defaults["auto_save_rec_folder"])
             self.txt_pref_rec.SetValue(defaults["prefix_rec"])
             self.cfg.update(defaults)
+            self._restore_shortcut_defaults()
 
             parent = self.GetParent()
             if hasattr(parent, "spin_steps"):
@@ -795,6 +1081,9 @@ class SettingsDialog(wx.Dialog):
                     self._("error_title"),
                     wx.OK | wx.ICON_ERROR,
                 )
+                return
+
+            if not self._save_shortcut_settings():
                 return
 
             new_asr = self.cb_asr.GetValue()
@@ -912,14 +1201,7 @@ class OmniVoiceFrame(wx.Frame):
         return translate(LOCALE, self.cfg.get("language", "en"), key)
 
     def ApplyConsoleState(self):
-        if not hasattr(ctypes, "windll"):
-            return
-        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-        if hwnd:
-            if self.cfg.get("hide_console", True):
-                ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
-            else:
-                ctypes.windll.user32.ShowWindow(hwnd, 5)  # SW_SHOW
+        SetConsoleVisible(not self.cfg.get("hide_console", True))
 
     def ApplyTheme(self):
         theme = self.cfg.get("theme", "light")
@@ -958,38 +1240,75 @@ class OmniVoiceFrame(wx.Frame):
         self.Layout()
         self.Refresh()
 
+    def ApplyShortcutSettings(self):
+        bindings = self.cfg.get("shortcut_bindings", default_shortcut_bindings())
+        enabled = self.cfg.get("shortcut_enabled", default_shortcut_enabled())
+        globally_enabled = self.cfg.get("shortcuts_enabled", True)
+        conflicting_actions = {
+            second for _first, second, _shortcut in find_shortcut_conflicts(bindings, enabled)
+        }
+        accelerator_entries = []
+
+        for definition in SHORTCUT_DEFINITIONS:
+            item, menu_label_key = self.shortcut_menu_items[definition.key]
+            try:
+                shortcut = normalize_shortcut(bindings.get(definition.key, definition.default))
+            except ValueError:
+                shortcut = definition.default
+            shortcut_active = (
+                globally_enabled
+                and enabled.get(definition.key, True)
+                and definition.key not in conflicting_actions
+            )
+            shortcut_label = (
+                shortcut
+                if shortcut_active
+                else self._("shortcut_menu_disabled").format(shortcut=shortcut)
+            )
+            item.SetItemLabel(f"{self._(menu_label_key)} ({shortcut_label})")
+            if shortcut_active:
+                accelerator_entries.append(_wx_accelerator(shortcut, item.GetId()))
+
+        self.SetAcceleratorTable(wx.AcceleratorTable(accelerator_entries))
+
     def InitUI(self):
         self.SetTitle(self._("title"))
 
         menubar = wx.MenuBar()
         progMenu = wx.Menu()
 
-        self.item_open_reference = progMenu.Append(
-            wx.ID_OPEN, f"{self._('menu_open_reference')}\tCtrl+O"
-        )
+        self.item_open_reference = progMenu.Append(wx.ID_OPEN, self._("menu_open_reference"))
         self.Bind(wx.EVT_MENU, self.OnShortcutOpen, self.item_open_reference)
 
-        self.item_generate = progMenu.Append(wx.ID_ANY, f"{self._('menu_generate')}\tCtrl+G")
+        self.item_generate = progMenu.Append(wx.ID_ANY, self._("menu_generate"))
         self.Bind(wx.EVT_MENU, self.OnShortcutGenerate, self.item_generate)
 
-        self.item_save_result = progMenu.Append(wx.ID_SAVE, f"{self._('menu_save_result')}\tCtrl+S")
+        self.item_save_result = progMenu.Append(wx.ID_SAVE, self._("menu_save_result"))
         self.Bind(wx.EVT_MENU, self.OnShortcutSave, self.item_save_result)
         self.item_save_result.Enable(False)
 
-        self.item_save_preset = progMenu.Append(
-            wx.ID_ANY, f"{self._('btn_save_preset_clone')}\tCtrl+Shift+S"
-        )
+        self.item_save_preset = progMenu.Append(wx.ID_ANY, self._("btn_save_preset_clone"))
         self.Bind(wx.EVT_MENU, self.OnShortcutSavePreset, self.item_save_preset)
 
-        self.item_record = progMenu.Append(wx.ID_ANY, f"{self._('menu_record')}\tCtrl+R")
+        self.item_record = progMenu.Append(wx.ID_ANY, self._("menu_record"))
         self.Bind(wx.EVT_MENU, self.OnShortcutRecord, self.item_record)
 
-        self.item_play_pause = progMenu.Append(wx.ID_ANY, f"{self._('menu_play_pause')}\tCtrl+P")
+        self.item_play_pause = progMenu.Append(wx.ID_ANY, self._("menu_play_pause"))
         self.Bind(wx.EVT_MENU, self.OnShortcutPlayPause, self.item_play_pause)
         self.item_play_pause.Enable(False)
 
-        self.item_stop_playback = progMenu.Append(wx.ID_ANY, f"{self._('stop_play')}\tCtrl+Shift+P")
+        self.item_stop_playback = progMenu.Append(wx.ID_ANY, self._("stop_play"))
         self.Bind(wx.EVT_MENU, self.OnShortcutStopPlayback, self.item_stop_playback)
+
+        self.shortcut_menu_items = {
+            "open_reference": (self.item_open_reference, "menu_open_reference"),
+            "generate": (self.item_generate, "menu_generate"),
+            "save_result": (self.item_save_result, "menu_save_result"),
+            "save_preset": (self.item_save_preset, "btn_save_preset_clone"),
+            "record": (self.item_record, "menu_record"),
+            "play_pause": (self.item_play_pause, "menu_play_pause"),
+            "stop_playback": (self.item_stop_playback, "stop_play"),
+        }
 
         progMenu.AppendSeparator()
         self.item_settings = progMenu.Append(wx.ID_ANY, self._("menu_settings"))
@@ -1006,27 +1325,7 @@ class OmniVoiceFrame(wx.Frame):
         menubar.Append(helpMenu, self._("menu_help"))
 
         self.SetMenuBar(menubar)
-        self.SetAcceleratorTable(
-            wx.AcceleratorTable(
-                [
-                    (wx.ACCEL_CTRL, ord("O"), self.item_open_reference.GetId()),
-                    (wx.ACCEL_CTRL, ord("G"), self.item_generate.GetId()),
-                    (wx.ACCEL_CTRL, ord("S"), self.item_save_result.GetId()),
-                    (
-                        wx.ACCEL_CTRL | wx.ACCEL_SHIFT,
-                        ord("S"),
-                        self.item_save_preset.GetId(),
-                    ),
-                    (wx.ACCEL_CTRL, ord("R"), self.item_record.GetId()),
-                    (wx.ACCEL_CTRL, ord("P"), self.item_play_pause.GetId()),
-                    (
-                        wx.ACCEL_CTRL | wx.ACCEL_SHIFT,
-                        ord("P"),
-                        self.item_stop_playback.GetId(),
-                    ),
-                ]
-            )
-        )
+        self.ApplyShortcutSettings()
 
         self.panel = wx.Panel(self)
         self.main_vbox = wx.BoxSizer(wx.VERTICAL)
@@ -1258,6 +1557,7 @@ class OmniVoiceFrame(wx.Frame):
                 return
             self.cfg = dlg.cfg
             self.ApplyConsoleState()
+            self.ApplyShortcutSettings()
             self.ApplyTheme()
             self.ApplyFontSize()
             if old_lang != self.cfg["language"]:
@@ -2366,6 +2666,7 @@ def main():
         return 1
 
     cfg = LoadBasicConfig()
+    SetConsoleVisible(not cfg.get("hide_console", True))
 
     if not cfg.get("first_run_done", False):
         dlg = SettingsDialog(None, is_first_run=True, current_cfg=cfg)

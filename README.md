@@ -47,6 +47,15 @@ The mode can be changed explicitly with `start_desktop.bat -Mode Portable` or
 `start_desktop.bat -Mode System`. `start_desktop.bat -InstallOnly` installs and
 validates everything without opening the desktop application.
 
+When **Hide launcher console** is enabled, normal launches are handed off to
+`pythonw.exe` so the console does not remain open with the application. The
+launcher keeps its console available during first-time installation and shows
+it again if startup or environment repair fails.
+
+Keyboard shortcuts can be edited on the **Keyboard shortcuts** settings tab.
+Each command can be enabled independently, all shortcuts can be disabled with
+one global checkbox, and the default assignments can be restored at any time.
+
 Manual setup:
 
 ```powershell

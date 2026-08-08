@@ -17,6 +17,11 @@ from omnisonic.config import (
 )
 from omnisonic.i18n import load_locales, missing_keys, translate
 from omnisonic.operations import OperationState, execute_worker
+from omnisonic.shortcuts import (
+    SHORTCUT_DEFINITIONS,
+    find_shortcut_conflicts,
+    normalize_shortcut,
+)
 from omnisonic.validation import (
     preset_filename,
     safe_child_path,
@@ -58,6 +63,32 @@ class ConfigTests(unittest.TestCase):
             path.write_text("not json", encoding="utf-8")
             with self.assertLogs("omnisonic.config", level="WARNING"):
                 self.assertEqual(load_config(path), DEFAULT_CONFIG)
+
+    def test_shortcut_config_is_normalized_and_unknown_actions_are_removed(self):
+        result = normalize_config(
+            {
+                "shortcut_bindings": {
+                    "generate": "control + shift + g",
+                    "save_result": "not-a-shortcut",
+                    "unknown": "Ctrl+U",
+                },
+                "shortcut_enabled": {"generate": False, "save_result": "no"},
+            }
+        )
+        self.assertEqual(result["shortcut_bindings"]["generate"], "Ctrl+Shift+G")
+        self.assertEqual(result["shortcut_bindings"]["save_result"], "Ctrl+S")
+        self.assertNotIn("unknown", result["shortcut_bindings"])
+        self.assertFalse(result["shortcut_enabled"]["generate"])
+        self.assertTrue(result["shortcut_enabled"]["save_result"])
+
+    def test_default_shortcut_config_is_not_shared_between_loads(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing_path = Path(temp_dir) / "missing.json"
+            first = load_config(missing_path)
+            second = load_config(missing_path)
+        first["shortcut_bindings"]["generate"] = "Ctrl+Alt+G"
+        self.assertEqual(second["shortcut_bindings"]["generate"], "Ctrl+G")
+        self.assertEqual(DEFAULT_CONFIG["shortcut_bindings"]["generate"], "Ctrl+G")
 
 
 class ValidationTests(unittest.TestCase):
@@ -104,6 +135,29 @@ class OperationTests(unittest.TestCase):
         self.assertTrue(state.cancel_flag)
 
 
+class ShortcutTests(unittest.TestCase):
+    def test_shortcuts_are_canonicalized(self):
+        self.assertEqual(normalize_shortcut("control + shift + g"), "Ctrl+Shift+G")
+        self.assertEqual(normalize_shortcut("alt+f12"), "Alt+F12")
+        self.assertEqual(normalize_shortcut("Ctrl + page down"), "Ctrl+PageDown")
+
+    def test_plain_letters_and_unsupported_keys_are_rejected(self):
+        for shortcut in ("G", "Shift+G", "Ctrl++G", "Ctrl+VolumeUp"):
+            with self.subTest(shortcut=shortcut), self.assertRaises(ValueError):
+                normalize_shortcut(shortcut)
+
+    def test_conflicts_only_include_enabled_shortcuts(self):
+        bindings = {definition.key: definition.default for definition in SHORTCUT_DEFINITIONS}
+        enabled = {definition.key: True for definition in SHORTCUT_DEFINITIONS}
+        bindings["save_result"] = bindings["generate"]
+        self.assertEqual(
+            find_shortcut_conflicts(bindings, enabled),
+            [("generate", "save_result", "Ctrl+G")],
+        )
+        enabled["save_result"] = False
+        self.assertEqual(find_shortcut_conflicts(bindings, enabled), [])
+
+
 class LocaleTests(unittest.TestCase):
     @staticmethod
     def _load_project_locales():
@@ -118,6 +172,10 @@ class LocaleTests(unittest.TestCase):
         self.assertEqual(translate(locales, "pl", "title"), "OmniSonic")
         self.assertEqual(translate(locales, "pl", "menu_help_tags"), "Lista znaczników głosu")
         self.assertEqual(translate(locales, "en", "menu_help_tags"), "Voice tag list")
+        for definition in SHORTCUT_DEFINITIONS:
+            with self.subTest(shortcut=definition.key):
+                self.assertIn(definition.label_key, locales["en"])
+                self.assertIn(definition.label_key, locales["pl"])
 
     def test_locale_placeholders_and_unicode_are_consistent(self):
         _root, locales = self._load_project_locales()

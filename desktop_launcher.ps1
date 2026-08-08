@@ -4,7 +4,8 @@ param(
     [string]$Mode = "Auto",
     [switch]$BootstrapOnly,
     [switch]$InstallOnly,
-    [switch]$SelfTest
+    [switch]$SelfTest,
+    [switch]$QueryHiddenLaunch
 )
 
 Set-StrictMode -Version 2.0
@@ -27,7 +28,9 @@ function Write-Step {
     Write-Host "[INFO] $Message" -ForegroundColor Cyan
 }
 
-function Show-LauncherConsole {
+function Set-LauncherConsoleVisible {
+    param([bool]$Visible)
+
     try {
         if (-not ("OmniSonicConsoleWindow" -as [type])) {
             Add-Type -TypeDefinition @"
@@ -43,12 +46,83 @@ public static class OmniSonicConsoleWindow {
         }
         $handle = [OmniSonicConsoleWindow]::GetConsoleWindow()
         if ($handle -ne [IntPtr]::Zero) {
-            [OmniSonicConsoleWindow]::ShowWindow($handle, 5) | Out-Null
+            $command = if ($Visible) { 5 } else { 0 }
+            [OmniSonicConsoleWindow]::ShowWindow($handle, $command) | Out-Null
         }
     }
     catch {
-        # Error reporting below must still continue if the console API is unavailable.
+        # pythonw.exe still prevents the application itself from owning a console.
     }
+}
+
+function Show-LauncherConsole {
+    Set-LauncherConsoleVisible $true
+}
+
+function Hide-LauncherConsole {
+    Set-LauncherConsoleVisible $false
+}
+
+function Get-SettingsPath {
+    if ($env:OMNISONIC_DATA_DIR) {
+        return Join-Path $env:OMNISONIC_DATA_DIR "settings.json"
+    }
+    $localData = [Environment]::GetFolderPath("LocalApplicationData")
+    return Join-Path (Join-Path $localData "OmniSonic") "settings.json"
+}
+
+function Get-PreferenceSettingsPath {
+    $settingsPath = Get-SettingsPath
+    if (Test-Path -LiteralPath $settingsPath) {
+        return $settingsPath
+    }
+    $legacyPath = Join-Path $ProjectRoot "settings.json"
+    if (Test-Path -LiteralPath $legacyPath) {
+        return $legacyPath
+    }
+    return $settingsPath
+}
+
+function Get-HideConsolePreference {
+    $settingsPath = Get-PreferenceSettingsPath
+    if (-not (Test-Path -LiteralPath $settingsPath)) {
+        return $true
+    }
+    try {
+        $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+        $hideProperty = $settings.PSObject.Properties["hide_console"]
+        if ($null -ne $hideProperty -and $hideProperty.Value -is [bool]) {
+            return $hideProperty.Value
+        }
+        $showProperty = $settings.PSObject.Properties["show_console"]
+        if ($null -ne $showProperty -and $showProperty.Value -is [bool]) {
+            return -not $showProperty.Value
+        }
+    }
+    catch {
+        # The application will repair an invalid settings file using its defaults.
+    }
+    return $true
+}
+
+function Test-HiddenLaunchReady {
+    $settingsPath = Get-PreferenceSettingsPath
+    $hasRuntimeState = (Test-Path -LiteralPath $ModeFile) -or
+        (Test-Path -LiteralPath (Join-Path $PortableDir ".omnisonic-ready")) -or
+        (Test-Path -LiteralPath (Join-Path $VenvDir ".omnisonic-ready"))
+    return (Get-HideConsolePreference) -and
+        (Test-Path -LiteralPath $settingsPath) -and
+        $hasRuntimeState
+}
+
+function Get-GuiPython {
+    param([string]$Python)
+
+    $pythonw = Join-Path (Split-Path -Parent $Python) "pythonw.exe"
+    if (Test-Path -LiteralPath $pythonw) {
+        return $pythonw
+    }
+    return $null
 }
 
 function Remove-LauncherDirectory {
@@ -343,19 +417,40 @@ function Invoke-SelfTest {
     }
     $systemPython = Find-SystemPython
     if ($systemPython) {
+        if (-not (Get-GuiPython $systemPython)) {
+            throw "The compatible Python installation does not include pythonw.exe."
+        }
         Write-Host "Compatible system Python: $systemPython"
     }
     else {
         Write-Host "Compatible system Python: not found (portable mode remains available)"
+    }
+    $batchLauncher = Get-Content -LiteralPath (Join-Path $ProjectRoot "start_desktop.bat") -Raw
+    if ($batchLauncher -notmatch "QueryHiddenLaunch") {
+        throw "The batch launcher does not support hidden startup."
     }
     Write-Host "OmniSonic launcher self-test: OK"
 }
 
 function Invoke-Main {
     Set-Location -LiteralPath $ProjectRoot
+    if ($QueryHiddenLaunch) {
+        if (Test-HiddenLaunchReady) {
+            Write-Output "HIDE"
+        }
+        else {
+            Write-Output "FOREGROUND"
+        }
+        return
+    }
     if ($SelfTest) {
         Invoke-SelfTest
         return
+    }
+
+    $hideConsole = Get-HideConsolePreference
+    if (Test-HiddenLaunchReady) {
+        Hide-LauncherConsole
     }
 
     $portablePython = Join-Path $PortableDir "python.exe"
@@ -404,6 +499,7 @@ function Invoke-Main {
     }
 
     if (-not (Test-Runtime $python)) {
+        Show-LauncherConsole
         Install-Or-RepairRuntime $python
     }
 
@@ -415,6 +511,15 @@ function Invoke-Main {
     Write-Host ""
     Write-Step "Starting OmniSonic"
     $env:OMNISONIC_APP_DIR = $ProjectRoot
+    if ($hideConsole) {
+        $guiPython = Get-GuiPython $python
+        if ($guiPython) {
+            Start-Process -FilePath $guiPython -ArgumentList @("-m", "omnisonic.app") `
+                -WorkingDirectory $ProjectRoot -WindowStyle Hidden | Out-Null
+            return
+        }
+        Hide-LauncherConsole
+    }
     & $python -m omnisonic.app
     if ($LASTEXITCODE -ne 0) {
         Show-LauncherConsole
