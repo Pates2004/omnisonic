@@ -825,16 +825,16 @@ class OmniVoiceFrame(wx.Frame):
         self.btn_play.Bind(wx.EVT_BUTTON, self.OnPlayAudio)
         self.btn_play.Disable()
         
-        self.btn_pause = wx.Button(self.panel, label=self._("pause"))
-        self.btn_pause.Bind(wx.EVT_BUTTON, self.OnPauseAudio)
-        self.btn_pause.Disable()
+        self.btn_stop_audio = wx.Button(self.panel, label=self._("stop_play"))
+        self.btn_stop_audio.Bind(wx.EVT_BUTTON, self.OnStopAudio)
+        self.btn_stop_audio.Hide()
         
         self.btn_save = wx.Button(self.panel, label=self._("save"))
         self.btn_save.Bind(wx.EVT_BUTTON, self.OnSaveAudio)
         self.btn_save.Disable()
         
         hbox_audio.Add(self.btn_play, 1, wx.EXPAND | wx.RIGHT, 5)
-        hbox_audio.Add(self.btn_pause, 1, wx.EXPAND | wx.RIGHT, 5)
+        hbox_audio.Add(self.btn_stop_audio, 1, wx.EXPAND | wx.RIGHT, 5)
         hbox_audio.Add(self.btn_save, 1, wx.EXPAND, 0)
         self.main_vbox.Add(hbox_audio, 0, wx.EXPAND | wx.ALL, 5)
         
@@ -982,7 +982,11 @@ class OmniVoiceFrame(wx.Frame):
         btn_browse.Bind(wx.EVT_BUTTON, self.OnBrowseRefAudio)
         
         self.btn_play_ref = wx.Button(tab, label=self._("play_ref"))
-        self.btn_play_ref.Bind(wx.EVT_BUTTON, lambda e: self.TogglePlayFile(self.btn_play_ref, self.clone_ref_audio))
+        self.btn_play_ref.Bind(wx.EVT_BUTTON, lambda e: self.TogglePlayFile(self.btn_play_ref, self.clone_ref_audio, self.btn_stop_ref, tab))
+        
+        self.btn_stop_ref = wx.Button(tab, label=self._("stop_play"))
+        self.btn_stop_ref.Bind(wx.EVT_BUTTON, lambda e: self.StopPlayFile(self.btn_play_ref, self.btn_stop_ref, tab))
+        self.btn_stop_ref.Hide()
         
         self.btn_rec_ref = wx.Button(tab, label=self._("rec_ref"))
         self.btn_rec_ref.Bind(wx.EVT_BUTTON, lambda e: self.ToggleRecord(self.btn_rec_ref, self.clone_ref_audio))
@@ -990,6 +994,7 @@ class OmniVoiceFrame(wx.Frame):
         hbox_ref.Add(self.clone_ref_audio, 1, wx.EXPAND | wx.RIGHT, 5)
         hbox_ref.Add(btn_browse, 0, wx.EXPAND | wx.RIGHT, 5)
         hbox_ref.Add(self.btn_play_ref, 0, wx.EXPAND | wx.RIGHT, 5)
+        hbox_ref.Add(self.btn_stop_ref, 0, wx.EXPAND | wx.RIGHT, 5)
         hbox_ref.Add(self.btn_rec_ref, 0, wx.EXPAND | wx.RIGHT, 5)
         
         self.btn_save_preset = wx.Button(tab, label=self._("btn_save_preset_clone"))
@@ -1454,58 +1459,66 @@ class OmniVoiceFrame(wx.Frame):
             event.Skip()
 
     def OnPlayAudio(self, event):
-        if self.btn_play.GetLabel() in [self._("play"), self._("resume_play")]:
+        if self.btn_play.GetLabel() == self._("play"):
             if self.audio_data is not None and sd:
-                if not hasattr(self, 'is_paused') or not self.is_paused:
-                    self.current_frame = 0
-                    self.total_frames = len(self.audio_data)
-                    self.is_paused = False
-                    
+                self.current_frame = 0
+                self.total_frames = len(self.audio_data)
+                self.is_paused = False
+                
                 frames_left = self.total_frames - self.current_frame
                 sd.play(self.audio_data[self.current_frame:], samplerate=self.sample_rate)
                 
-                self.btn_play.SetLabel(self._("stop_play"))
-                self.btn_pause.Enable()
-                self.btn_pause.SetLabel(self._("pause"))
+                self.btn_play.SetLabel(self._("pause"))
+                self.btn_stop_audio.Show()
+                self.panel.Layout()
                 
                 duration_ms = int((frames_left / self.sample_rate) * 1000)
                 if hasattr(self, 'play_timer'): self.play_timer.Stop()
                 
                 def on_finish():
                     self.btn_play.SetLabel(self._("play"))
-                    self.btn_pause.Disable()
+                    self.btn_stop_audio.Hide()
+                    self.panel.Layout()
                     self.is_paused = False
                     self.current_frame = 0
                     
                 self.play_timer = wx.CallLater(duration_ms + 100, on_finish)
                 
-        else: # stop play
-            if sd: sd.stop()
-            if hasattr(self, 'play_timer'): self.play_timer.Stop()
-            self.btn_play.SetLabel(self._("play"))
-            self.btn_pause.Disable()
-            self.btn_pause.SetLabel(self._("pause"))
-            self.is_paused = False
-            self.current_frame = 0
-
-    def OnPauseAudio(self, event):
-        if not hasattr(self, 'is_paused'):
-            self.is_paused = False
-            
-        if sd and self.btn_play.GetLabel() == self._("stop_play"):
-            if not self.is_paused:
-                self.is_paused = True
-                if hasattr(self, 'play_timer'):
-                    elapsed_ms = self.play_timer.GetInterval() - self.play_timer.TimeRemaining()
-                    self.current_frame += int((elapsed_ms / 1000) * self.sample_rate)
-                    self.play_timer.Stop()
-                sd.stop()
-                self.btn_pause.SetLabel(self._("resume_play"))
-        elif sd and self.btn_pause.GetLabel() == self._("resume_play"):
+        elif self.btn_play.GetLabel() == self._("pause"):
+            self.is_paused = True
+            if hasattr(self, 'play_timer'):
+                elapsed_ms = self.play_timer.GetInterval() - self.play_timer.TimeRemaining()
+                self.current_frame += int((elapsed_ms / 1000) * self.sample_rate)
+                self.play_timer.Stop()
+            sd.stop()
             self.btn_play.SetLabel(self._("resume_play"))
-            self.OnPlayAudio(event)
+            
+        elif self.btn_play.GetLabel() == self._("resume_play"):
+            self.is_paused = False
+            frames_left = self.total_frames - self.current_frame
+            sd.play(self.audio_data[self.current_frame:], samplerate=self.sample_rate)
+            self.btn_play.SetLabel(self._("pause"))
+            
+            duration_ms = int((frames_left / self.sample_rate) * 1000)
+            if hasattr(self, 'play_timer'): self.play_timer.Stop()
+            
+            def on_finish():
+                self.btn_play.SetLabel(self._("play"))
+                self.btn_stop_audio.Hide()
+                self.panel.Layout()
+                self.is_paused = False
+                self.current_frame = 0
                 
+            self.play_timer = wx.CallLater(duration_ms + 100, on_finish)
 
+    def OnStopAudio(self, event):
+        if sd: sd.stop()
+        if hasattr(self, 'play_timer'): self.play_timer.Stop()
+        self.btn_play.SetLabel(self._("play"))
+        self.btn_stop_audio.Hide()
+        self.panel.Layout()
+        self.is_paused = False
+        self.current_frame = 0
 
     def PerformSaveAudio(self, data, fs, is_generated=True):
         import os
@@ -1549,26 +1562,57 @@ class OmniVoiceFrame(wx.Frame):
             self.PerformSaveAudio(self.audio_data, self.sample_rate, is_generated=True)
 
 
-    def TogglePlayFile(self, btn, path_ctrl):
-        if btn.GetLabel() == self._("play_ref"):
+    def TogglePlayFile(self, btn_play, path_ctrl, btn_stop, parent_tab):
+        if btn_play.GetLabel() == self._("play_ref"):
             path = path_ctrl.GetValue().strip()
             if not os.path.exists(path):
                 wx.MessageBox(self._("err_file_not_found"), self._("error_title"), wx.OK | wx.ICON_ERROR)
                 return
             try:
                 data, fs = sf.read(path)
-                sd.play(data, samplerate=fs)
-                btn.SetLabel(self._("stop_play"))
-                duration_ms = int((len(data) / fs) * 1000)
-                timer = wx.CallLater(duration_ms + 100, lambda: btn.SetLabel(self._("play_ref")))
-                setattr(self, f"timer_{id(btn)}", timer)
+                self.ref_audio_data = data
+                self.ref_sample_rate = fs
+                self.ref_current_frame = 0
+                self.ref_total_frames = len(data)
+                
+                sd.play(self.ref_audio_data[self.ref_current_frame:], samplerate=self.ref_sample_rate)
+                btn_play.SetLabel(self._("pause"))
+                btn_stop.Show()
+                parent_tab.Layout()
+                
+                duration_ms = int((self.ref_total_frames / fs) * 1000)
+                timer = wx.CallLater(duration_ms + 100, lambda: self.StopPlayFile(btn_play, btn_stop, parent_tab))
+                setattr(self, f"timer_{id(btn_play)}", timer)
+                
             except Exception as e:
                 wx.MessageBox(self._("err_playback").format(e=str(e)), self._("error_title"), wx.OK | wx.ICON_ERROR)
-        else:
-            if sd: sd.stop()
-            timer = getattr(self, f"timer_{id(btn)}", None)
-            if timer: timer.Stop()
-            btn.SetLabel(self._("play_ref"))
+                
+        elif btn_play.GetLabel() == self._("pause"):
+            timer = getattr(self, f"timer_{id(btn_play)}", None)
+            if timer:
+                elapsed_ms = timer.GetInterval() - timer.TimeRemaining()
+                self.ref_current_frame += int((elapsed_ms / 1000) * self.ref_sample_rate)
+                timer.Stop()
+            sd.stop()
+            btn_play.SetLabel(self._("resume_play"))
+            
+        elif btn_play.GetLabel() == self._("resume_play"):
+            frames_left = self.ref_total_frames - self.ref_current_frame
+            sd.play(self.ref_audio_data[self.ref_current_frame:], samplerate=self.ref_sample_rate)
+            btn_play.SetLabel(self._("pause"))
+            
+            duration_ms = int((frames_left / self.ref_sample_rate) * 1000)
+            timer = wx.CallLater(duration_ms + 100, lambda: self.StopPlayFile(btn_play, btn_stop, parent_tab))
+            setattr(self, f"timer_{id(btn_play)}", timer)
+
+    def StopPlayFile(self, btn_play, btn_stop, parent_tab):
+        if sd: sd.stop()
+        timer = getattr(self, f"timer_{id(btn_play)}", None)
+        if timer: timer.Stop()
+        btn_play.SetLabel(self._("play_ref"))
+        btn_stop.Hide()
+        parent_tab.Layout()
+        self.ref_current_frame = 0
 
     def ToggleRecord(self, btn, path_ctrl):
         if btn.GetLabel() == self._("rec_ref"):
