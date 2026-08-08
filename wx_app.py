@@ -1459,6 +1459,7 @@ class OmniVoiceFrame(wx.Frame):
             event.Skip()
 
     def OnPlayAudio(self, event):
+        import time
         if self.btn_play.GetLabel() == self._("play"):
             if self.audio_data is not None and sd:
                 self.current_frame = 0
@@ -1473,7 +1474,7 @@ class OmniVoiceFrame(wx.Frame):
                 self.panel.Layout()
                 
                 duration_ms = int((frames_left / self.sample_rate) * 1000)
-                if hasattr(self, 'play_timer'): self.play_timer.Stop()
+                if hasattr(self, 'play_timer') and self.play_timer: self.play_timer.Stop()
                 
                 def on_finish():
                     self.btn_play.SetLabel(self._("play"))
@@ -1481,14 +1482,17 @@ class OmniVoiceFrame(wx.Frame):
                     self.panel.Layout()
                     self.is_paused = False
                     self.current_frame = 0
+                    self.play_start_time = None
                     
+                self.play_start_time = time.time()
                 self.play_timer = wx.CallLater(duration_ms + 100, on_finish)
                 
         elif self.btn_play.GetLabel() == self._("pause"):
             self.is_paused = True
-            if hasattr(self, 'play_timer'):
-                elapsed_ms = self.play_timer.GetInterval() - self.play_timer.TimeRemaining()
-                self.current_frame += int((elapsed_ms / 1000) * self.sample_rate)
+            if hasattr(self, 'play_timer') and self.play_timer:
+                if hasattr(self, 'play_start_time') and self.play_start_time:
+                    elapsed = time.time() - self.play_start_time
+                    self.current_frame += int(elapsed * self.sample_rate)
                 self.play_timer.Stop()
             sd.stop()
             self.btn_play.SetLabel(self._("resume_play"))
@@ -1500,7 +1504,7 @@ class OmniVoiceFrame(wx.Frame):
             self.btn_play.SetLabel(self._("pause"))
             
             duration_ms = int((frames_left / self.sample_rate) * 1000)
-            if hasattr(self, 'play_timer'): self.play_timer.Stop()
+            if hasattr(self, 'play_timer') and self.play_timer: self.play_timer.Stop()
             
             def on_finish():
                 self.btn_play.SetLabel(self._("play"))
@@ -1508,7 +1512,9 @@ class OmniVoiceFrame(wx.Frame):
                 self.panel.Layout()
                 self.is_paused = False
                 self.current_frame = 0
+                self.play_start_time = None
                 
+            self.play_start_time = time.time()
             self.play_timer = wx.CallLater(duration_ms + 100, on_finish)
 
     def OnStopAudio(self, event):
@@ -1559,10 +1565,15 @@ class OmniVoiceFrame(wx.Frame):
 
     def OnSaveAudio(self, event):
         if self.audio_data is not None:
-            self.PerformSaveAudio(self.audio_data, self.sample_rate, is_generated=True)
+            self.OnStopAudio(None)
+            try:
+                self.PerformSaveAudio(self.audio_data, self.sample_rate, is_generated=True)
+            except Exception as e:
+                wx.MessageBox(f"Błąd podczas zapisywania: {str(e)}", "Błąd", wx.OK | wx.ICON_ERROR)
 
 
     def TogglePlayFile(self, btn_play, path_ctrl, btn_stop, parent_tab):
+        import time
         if btn_play.GetLabel() == self._("play_ref"):
             path = path_ctrl.GetValue().strip()
             if not os.path.exists(path):
@@ -1583,6 +1594,7 @@ class OmniVoiceFrame(wx.Frame):
                 duration_ms = int((self.ref_total_frames / fs) * 1000)
                 timer = wx.CallLater(duration_ms + 100, lambda: self.StopPlayFile(btn_play, btn_stop, parent_tab))
                 setattr(self, f"timer_{id(btn_play)}", timer)
+                setattr(self, f"start_{id(btn_play)}", time.time())
                 
             except Exception as e:
                 wx.MessageBox(self._("err_playback").format(e=str(e)), self._("error_title"), wx.OK | wx.ICON_ERROR)
@@ -1590,8 +1602,10 @@ class OmniVoiceFrame(wx.Frame):
         elif btn_play.GetLabel() == self._("pause"):
             timer = getattr(self, f"timer_{id(btn_play)}", None)
             if timer:
-                elapsed_ms = timer.GetInterval() - timer.TimeRemaining()
-                self.ref_current_frame += int((elapsed_ms / 1000) * self.ref_sample_rate)
+                start_time = getattr(self, f"start_{id(btn_play)}", None)
+                if start_time:
+                    elapsed = time.time() - start_time
+                    self.ref_current_frame += int(elapsed * self.ref_sample_rate)
                 timer.Stop()
             sd.stop()
             btn_play.SetLabel(self._("resume_play"))
@@ -1604,6 +1618,7 @@ class OmniVoiceFrame(wx.Frame):
             duration_ms = int((frames_left / self.ref_sample_rate) * 1000)
             timer = wx.CallLater(duration_ms + 100, lambda: self.StopPlayFile(btn_play, btn_stop, parent_tab))
             setattr(self, f"timer_{id(btn_play)}", timer)
+            setattr(self, f"start_{id(btn_play)}", time.time())
 
     def StopPlayFile(self, btn_play, btn_stop, parent_tab):
         if sd: sd.stop()

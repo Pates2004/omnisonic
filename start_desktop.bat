@@ -62,7 +62,7 @@ exit /b
 :UseSystem
 echo [INFO] Environment not found. Launching installer UI...
 python install_venv_ui.py
-IF %ERRORLEVEL% NEQ 0 (
+IF ERRORLEVEL 1 (
     echo [ERROR] Installation cancelled.
     exit /b
 )
@@ -107,7 +107,7 @@ IF %ERRORLEVEL% EQU 0 (
     %PYTHON_CMD% -m pip install wxPython sounddevice soundfile numpy
 ) ELSE (
     %PYTHON_CMD% -c "import wx, sounddevice, soundfile" 2>nul
-    IF %ERRORLEVEL% NEQ 0 (
+    IF ERRORLEVEL 1 (
         echo [INFO] Brakuje bibliotek desktopowych. Trwa doinstalowywanie...
         %PYTHON_CMD% -m pip install wxPython sounddevice soundfile numpy
     )
@@ -117,7 +117,7 @@ echo [INFO] Launching Omnisonic Desktop App...
 %PYTHON_CMD% wx_app.py
 
 %PYTHON_CMD% -c "import json, sys, os; d = json.load(open('settings.json', encoding='utf-8')) if os.path.exists('settings.json') else {}; sys.exit(1 if d.get('show_console', False) and not d.get('close_console_on_exit', True) else 0)" 2>nul
-IF %ERRORLEVEL% NEQ 0 (
+IF ERRORLEVEL 1 (
     echo [INFO] Program zakończony. Zamykanie konsoli zostało anulowane w ustawieniach.
     pause
 ) ELSE (
