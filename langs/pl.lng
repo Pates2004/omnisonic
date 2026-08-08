@@ -170,5 +170,12 @@
     "msg_no_preset_sel": "Nie wybrano presetu.",
     "msg_presets_deleted": "Usunięto wszystkie presety.",
     "dl_model_prompt": "Wybrany model ({name}) nie jest pobrany. Czy chcesz go pobrać i zainstalować teraz?",
-    "dl_title": "Pobieranie modelu"
+    "dl_title": "Pobieranie modelu",
+    "resume_play": "Wznów",
+    "auto_save_gen": "Automatycznie zapisuj wygenerowane audio po zakończeniu",
+    "auto_save_gen_folder": "Zapisuj wygenerowane audio prosto do domyślnego folderu (odznacz, by pytać)",
+    "prefix_gen": "Prefix nazw plików (generowane):",
+    "auto_save_rec": "Automatycznie zapisuj nagrania z mikrofonu po zakończeniu",
+    "auto_save_rec_folder": "Zapisuj nagrania prosto do domyślnego folderu (odznacz, by pytać)",
+    "prefix_rec": "Prefix nazw plików (nagrywane):"
 }
