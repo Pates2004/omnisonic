@@ -5,6 +5,8 @@
     "menu_open_reference": "Open reference audio",
     "menu_generate": "Generate",
     "menu_save_result": "Save generated result",
+    "menu_record": "Start / stop recording",
+    "menu_play_pause": "Play / pause",
     "menu_settings": "Settings...",
     "menu_exit": "Exit",
     "tab_clone": "Voice Clone",

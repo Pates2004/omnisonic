@@ -5,6 +5,8 @@
     "menu_open_reference": "Otwórz plik referencyjny",
     "menu_generate": "Generuj",
     "menu_save_result": "Zapisz wygenerowany wynik",
+    "menu_record": "Nagraj / zatrzymaj nagrywanie",
+    "menu_play_pause": "Odtwórz / pauza",
     "menu_settings": "Ustawienia...",
     "menu_exit": "Zakończ",
     "tab_clone": "Klonowanie",

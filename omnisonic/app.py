@@ -976,6 +976,21 @@ class OmniVoiceFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.OnShortcutSave, self.item_save_result)
         self.item_save_result.Enable(False)
 
+        self.item_save_preset = progMenu.Append(
+            wx.ID_ANY, f"{self._('btn_save_preset_clone')}\tCtrl+Shift+S"
+        )
+        self.Bind(wx.EVT_MENU, self.OnShortcutSavePreset, self.item_save_preset)
+
+        self.item_record = progMenu.Append(wx.ID_ANY, f"{self._('menu_record')}\tCtrl+R")
+        self.Bind(wx.EVT_MENU, self.OnShortcutRecord, self.item_record)
+
+        self.item_play_pause = progMenu.Append(wx.ID_ANY, f"{self._('menu_play_pause')}\tCtrl+P")
+        self.Bind(wx.EVT_MENU, self.OnShortcutPlayPause, self.item_play_pause)
+        self.item_play_pause.Enable(False)
+
+        self.item_stop_playback = progMenu.Append(wx.ID_ANY, f"{self._('stop_play')}\tCtrl+Shift+P")
+        self.Bind(wx.EVT_MENU, self.OnShortcutStopPlayback, self.item_stop_playback)
+
         progMenu.AppendSeparator()
         self.item_settings = progMenu.Append(wx.ID_ANY, self._("menu_settings"))
         self.Bind(wx.EVT_MENU, self.OnOpenSettings, self.item_settings)
@@ -997,6 +1012,18 @@ class OmniVoiceFrame(wx.Frame):
                     (wx.ACCEL_CTRL, ord("O"), self.item_open_reference.GetId()),
                     (wx.ACCEL_CTRL, ord("G"), self.item_generate.GetId()),
                     (wx.ACCEL_CTRL, ord("S"), self.item_save_result.GetId()),
+                    (
+                        wx.ACCEL_CTRL | wx.ACCEL_SHIFT,
+                        ord("S"),
+                        self.item_save_preset.GetId(),
+                    ),
+                    (wx.ACCEL_CTRL, ord("R"), self.item_record.GetId()),
+                    (wx.ACCEL_CTRL, ord("P"), self.item_play_pause.GetId()),
+                    (
+                        wx.ACCEL_CTRL | wx.ACCEL_SHIFT,
+                        ord("P"),
+                        self.item_stop_playback.GetId(),
+                    ),
                 ]
             )
         )
@@ -1102,6 +1129,26 @@ class OmniVoiceFrame(wx.Frame):
             return
         self.OnSaveAudio(event)
 
+    def OnShortcutSavePreset(self, event):
+        self.notebook.SetSelection(0)
+        if self.btn_save_preset.IsEnabled():
+            self.OnSavePresetPrompt(event)
+        else:
+            wx.Bell()
+
+    def OnShortcutRecord(self, event):
+        self.notebook.SetSelection(0)
+        self.ToggleRecord(self.btn_rec_ref, self.clone_ref_audio)
+
+    def OnShortcutPlayPause(self, event):
+        if self.btn_play.IsEnabled():
+            self.OnPlayAudio(event)
+        else:
+            wx.Bell()
+
+    def OnShortcutStopPlayback(self, event):
+        self.OnStopAudio(event)
+
     def OnStopOperation(self, event):
         if self.current_op and not self.current_op.finished:
             dlg = wx.MessageDialog(
@@ -1129,6 +1176,8 @@ class OmniVoiceFrame(wx.Frame):
             self.item_settings.Enable(enabled)
         if hasattr(self, "item_generate"):
             self.item_generate.Enable(enabled)
+        if hasattr(self, "item_save_preset"):
+            self.item_save_preset.Enable(enabled)
 
     def _complete_operation(self, state, success_callback):
         if state.error is not None:
@@ -1592,6 +1641,7 @@ class OmniVoiceFrame(wx.Frame):
         self.audio_data = None
         self.btn_play.Disable()
         self.btn_save.Disable()
+        self.item_play_pause.Enable(False)
         self.item_save_result.Enable(False)
 
     def _finish_generation(self, audio):
@@ -1602,6 +1652,7 @@ class OmniVoiceFrame(wx.Frame):
         self.Log(self._("ready"), success=True)
         self.btn_play.Enable()
         self.btn_save.Enable()
+        self.item_play_pause.Enable()
         self.item_save_result.Enable()
         self.btn_play.SetFocus()
         wx.Bell()
