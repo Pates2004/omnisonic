@@ -17,7 +17,10 @@ warnings.filterwarnings(
 try:
     __version__ = version("omnivoice")
 except PackageNotFoundError:
-    __version__ = "0.0.0"
+    try:
+        __version__ = version("omnisonic")
+    except PackageNotFoundError:
+        __version__ = "0.2.1"
 
 from omnivoice.models.omnivoice import (
     OmniVoice,

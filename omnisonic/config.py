@@ -1,0 +1,190 @@
+"""Configuration and user-data paths for the OmniSonic desktop app."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Mapping
+
+logger = logging.getLogger(__name__)
+
+APP_NAME = "OmniSonic"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PACKAGE_DIR = Path(__file__).resolve().parent
+LEGACY_CONFIG_FILE = PROJECT_ROOT / "settings.json"
+
+
+def _default_data_dir() -> Path:
+    override = os.environ.get("OMNISONIC_DATA_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        return base / APP_NAME
+    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / APP_NAME.lower()
+
+
+def _program_dir() -> Path:
+    override = os.environ.get("OMNISONIC_APP_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    if (PROJECT_ROOT / "start_desktop.bat").is_file() or (
+        PROJECT_ROOT / "pyproject.toml"
+    ).is_file():
+        return PROJECT_ROOT
+    if sys.prefix != getattr(sys, "base_prefix", sys.prefix):
+        return Path(sys.prefix).resolve().parent
+    return Path.cwd().resolve()
+
+
+APP_DATA_DIR = _default_data_dir()
+PROGRAM_DIR = _program_dir()
+CONFIG_FILE = APP_DATA_DIR / "settings.json"
+PRESETS_DIR = PROGRAM_DIR / "presets"
+TEMP_DIR = APP_DATA_DIR / "temp"
+RECORDED_AUDIO_FILE = TEMP_DIR / "recorded_reference.wav"
+
+DEFAULT_CONFIG: dict[str, Any] = {
+    "language": "en",
+    "theme": "light",
+    "hide_console": True,
+    "force_splash": False,
+    "show_progress": True,
+    "use_native_dialogs": False,
+    "first_run_done": False,
+    "font_size": 10,
+    "warn_exit": True,
+    "remember_ai_settings": True,
+    "clean_temp": True,
+    "confirm_success": False,
+    "ai_steps": 32,
+    "ai_cfg": 2.0,
+    "ai_speed": 1.0,
+    "ai_denoise": True,
+    "fake_progress_numbers": False,
+    "preset_display_mode": "name",
+    "asr_model_name": "openai/whisper-large-v3-turbo",
+    "preload_asr": False,
+    "normalize_text": False,
+    "use_duration": False,
+    "duration_val": 5.0,
+    "clone_lang": "Auto",
+    "design_lang": "Auto",
+    "auto_lang": "Auto",
+    "warn_delete_preset": True,
+    "auto_save_gen": False,
+    "auto_save_gen_folder": False,
+    "prefix_gen": "generated",
+    "auto_save_rec": False,
+    "auto_save_rec_folder": False,
+    "prefix_rec": "record",
+}
+
+
+def _clamp_number(value: Any, default: float, minimum: float, maximum: float) -> float:
+    try:
+        return max(minimum, min(maximum, float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Merge persisted values with defaults and validate important fields."""
+    result = DEFAULT_CONFIG.copy()
+    if config:
+        result.update({key: config[key] for key in DEFAULT_CONFIG if key in config})
+        if "hide_console" not in config and isinstance(config.get("show_console"), bool):
+            result["hide_console"] = not config["show_console"]
+
+    for key, default in DEFAULT_CONFIG.items():
+        if isinstance(default, bool) and not isinstance(result.get(key), bool):
+            result[key] = default
+
+    result["font_size"] = int(_clamp_number(result.get("font_size"), 10, 8, 24))
+    result["ai_steps"] = int(_clamp_number(result.get("ai_steps"), 32, 1, 100))
+    result["ai_cfg"] = _clamp_number(result.get("ai_cfg"), 2.0, 0.1, 10.0)
+    result["ai_speed"] = _clamp_number(result.get("ai_speed"), 1.0, 0.1, 5.0)
+    result["duration_val"] = _clamp_number(result.get("duration_val"), 5.0, 0.1, 100.0)
+
+    if result.get("theme") not in {"light", "dark"}:
+        result["theme"] = "light"
+    if result.get("preset_display_mode") not in {"name", "path", "name_path"}:
+        result["preset_display_mode"] = "name"
+    for key in ("language", "asr_model_name", "prefix_gen", "prefix_rec"):
+        if not isinstance(result.get(key), str) or not result[key].strip():
+            result[key] = DEFAULT_CONFIG[key]
+        else:
+            result[key] = result[key].strip()
+    return result
+
+
+def load_config(path: Path | str = CONFIG_FILE) -> dict[str, Any]:
+    path = Path(path)
+    if not path.exists():
+        return DEFAULT_CONFIG.copy()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("configuration root must be a JSON object")
+        return normalize_config(data)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        logger.warning("Could not load configuration from %s: %s", path, exc)
+        return DEFAULT_CONFIG.copy()
+
+
+def save_config(config: Mapping[str, Any], path: Path | str = CONFIG_FILE) -> None:
+    """Persist configuration atomically so interruption cannot corrupt it."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(normalize_config(config), ensure_ascii=False, indent=4) + "\n"
+    temp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+        ) as temp_file:
+            temp_file.write(payload)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+            temp_name = temp_file.name
+        os.replace(temp_name, path)
+    finally:
+        if temp_name and os.path.exists(temp_name):
+            try:
+                os.remove(temp_name)
+            except OSError:
+                logger.warning("Could not remove temporary config file %s", temp_name)
+
+
+def ensure_user_directories() -> None:
+    for directory in (APP_DATA_DIR, PRESETS_DIR, TEMP_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+def migrate_legacy_user_data() -> None:
+    """Migrate the legacy settings file; presets are intentionally portable only."""
+    ensure_user_directories()
+    if LEGACY_CONFIG_FILE.exists() and not CONFIG_FILE.exists():
+        try:
+            shutil.copy2(LEGACY_CONFIG_FILE, CONFIG_FILE)
+        except OSError as exc:
+            logger.warning("Could not migrate legacy settings: %s", exc)
+
+
+def locale_search_directories() -> tuple[Path, ...]:
+    """Return packaged and source-checkout locale locations."""
+    return (PACKAGE_DIR / "langs", PROJECT_ROOT / "langs")
+
+
+def default_audio_directory(kind: str) -> Path:
+    documents = Path.home() / "Documents"
+    if documents.exists():
+        return documents / APP_NAME / kind
+    return APP_DATA_DIR / "audio" / kind

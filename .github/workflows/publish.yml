@@ -7,6 +7,7 @@ on:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || github.event.action == 'published'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +17,13 @@ jobs:
           python-version: "3.x"
 
       - name: Install build dependencies
-        run: pip install hatchling build twine
+        run: pip install hatchling build twine ruff
+
+      - name: Run quality checks
+        run: |
+          ruff check omnivoice omnisonic tests wx_app.py
+          ruff format --check omnivoice omnisonic tests wx_app.py
+          python -m unittest -v tests.test_desktop_logic
 
       - name: Build package
         run: python -m build

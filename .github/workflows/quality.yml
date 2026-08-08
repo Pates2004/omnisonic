@@ -1,0 +1,41 @@
+name: Quality checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop-logic:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install quality tools
+        run: python -m pip install "ruff>=0.11" "pytest>=8"
+      - name: Lint Python code
+        run: ruff check omnivoice omnisonic tests wx_app.py
+      - name: Check formatting
+        run: ruff format --check omnivoice omnisonic tests wx_app.py
+      - name: Compile Python sources
+        run: python -m compileall -q omnisonic omnivoice tests wx_app.py
+      - name: Test desktop logic
+        run: python -m unittest -v tests.test_desktop_logic
+      - name: Parse and self-test the desktop launcher
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\desktop_launcher.ps1), [ref]$tokens, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
+          .\desktop_launcher.ps1 -SelfTest
+      - name: Test the batch entry point
+        shell: cmd
+        run: start_desktop.bat -SelfTest

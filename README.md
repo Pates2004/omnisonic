@@ -1,58 +1,110 @@
 # OmniSonic 🎧
 
-OmniSonic is an advanced, fully-featured desktop Graphical User Interface (GUI) wrapper for the [OmniVoice](https://github.com/k2-fsa/OmniVoice) Text-to-Speech (TTS) model. Built with Python and wxPython, OmniSonic makes state-of-the-art zero-shot voice cloning and voice design accessible without touching the command line.
+OmniSonic is an accessible Windows desktop application for the
+[OmniVoice](https://github.com/k2-fsa/OmniVoice) multilingual text-to-speech
+engine. It provides voice cloning, voice design, automatic voice generation,
+microphone recording, reusable private presets, and Polish/English interfaces.
 
-## Key Features
+## Najważniejsze funkcje / Highlights
 
-- **Intuitive Desktop GUI**: A native desktop application built with wxPython for seamless user experience.
-- **Voice Cloning & Voice Design**: Easily clone voices from reference audio files or design voices using attributes like gender, pitch, age, and accent.
-- **Microphone Recording**: Built-in microphone recording to instantly clone your own voice or any captured audio.
-- **Advanced Audio Playback**: Smart audio player with Pause, Resume, and Stop capabilities for both reference audio and generated speech.
-- **Preset System**: Save and load your favorite voice clone prompts and design configurations as presets for quick access.
-- **Bilingual Interface**: Full support for both Polish (PL) and English (EN) out of the box, switchable on the fly.
-- **Highly Configurable**: Control AI parameters (CFG, Speed, Steps, Denoising) and UI behavior (notifications, themes, font sizes, temp file cleanup) via an organized Settings tab.
+- native wxPython interface designed for keyboard and NVDA use;
+- voice cloning from a WAV or MP3 reference, with optional ASR transcription;
+- automatic and attribute-based voice design;
+- pause, resume, stop, recording, manual save, and configurable auto-save;
+- portable voice presets stored in the application's ignored `presets/` directory;
+- lazy ASR loading to reduce startup time and memory use;
+- Polish and English localization.
 
-## Installation
+## Wymagania / Requirements
 
-OmniSonic requires Python and a working installation of the `omnivoice` library.
+- Windows 10 or newer;
+- Windows PowerShell 5.1 (included with supported Windows versions);
+- a 64-bit Python 3.10-3.13 installation is optional;
+- an NVIDIA GPU is recommended for practical generation speed;
+- a working audio output device; microphone access is required only for recording.
 
-1. **Install OmniVoice**:
-   Follow the [official OmniVoice installation guide](https://github.com/k2-fsa/OmniVoice) to install PyTorch and the model.
+The installer selects the CUDA build of PyTorch when an NVIDIA installation is
+detected and otherwise installs the CPU build. CPU inference can be very slow.
+WAV works without external codecs. MP3 and some other reference formats may
+additionally require [FFmpeg](https://ffmpeg.org/download.html) on `PATH`.
 
-2. **Install OmniSonic Requirements**:
-   ```bash
-   pip install wxpython sounddevice soundfile numpy plyer
-   ```
+## Instalacja i uruchomienie / Install and run
 
-3. **Run the App**:
-   ```bash
-   python wx_app.py
-   ```
+The recommended one-click path is:
 
-## Usage
+```text
+start_desktop.bat
+```
 
-### Voice Cloning (Klonowanie Głosu)
-1. Navigate to the **Clone Voice** tab.
-2. Select a reference audio file from your computer or record one using your microphone.
-3. Type the text you want to generate.
-4. Click **Generate** and listen to the cloned voice!
+On a fresh installation the launcher offers two isolated modes: its own
+portable Python 3.12.10 in `env/` (recommended), or `venv/` based on a compatible
+system Python. It remembers the choice, installs wxPython and the audio/AI
+dependencies, verifies them with `pip check` and runtime imports, and repairs a
+damaged environment on the next launch. Installation failures are reported
+instead of being ignored.
 
-### Voice Design (Projektowanie Głosu)
-1. Navigate to the **Voice Design** tab.
-2. Type the text you want to generate.
-3. Enter instructions for the AI (e.g., "female, low pitch, british accent").
-4. Click **Generate**.
+The mode can be changed explicitly with `start_desktop.bat -Mode Portable` or
+`start_desktop.bat -Mode System`. `start_desktop.bat -InstallOnly` installs and
+validates everything without opening the desktop application.
 
-### Presets
-Save your favorite prompts and voices in the **Presets** tab. You can name them and easily retrieve them later. You can configure how presets are displayed (Name only, Full path, or both) in the Settings.
+Manual setup:
 
-### Settings
-Click on **Settings** (Ustawienia) to customize your OmniSonic experience:
-- **Appearance & Language**: Change language (PL/EN) and UI theme.
-- **System & Presets**: Manage console visibility, preset display style, and temp file cleaning.
-- **AI Options**: Configure generation notification popups and system alerts.
+```powershell
+python -m venv venv
+venv\Scripts\python -m pip install --upgrade pip
+venv\Scripts\python -m pip install -e ".[desktop]"
+venv\Scripts\python -m omnisonic.app
+```
 
-## Credits
+After installation, the `omnisonic` command is also available.
 
-- GUI & App logic: Pates2004 (OmniSonic)
-- Underlying TTS AI Engine: [OmniVoice](https://github.com/k2-fsa/OmniVoice) by the k2-fsa team.
+## Dane prywatne / Private data
+
+Voice presets are stored in the portable `presets/` directory next to the
+application. This makes it possible to move or back up the program together
+with all saved voices. Settings and temporary recordings remain under the
+user's OmniSonic application-data directory (normally
+`%LOCALAPPDATA%\OmniSonic`). No other preset location is scanned or migrated.
+
+Voice presets contain derived voice tokens and may contain a reference
+transcript. Treat them as private data. The complete `presets/` tree is ignored
+by Git.
+
+Generated and recorded WAV files are saved under
+`Documents\OmniSonic\generated` and `Documents\OmniSonic\recorded`, unless the
+user chooses another location.
+
+## Development
+
+```powershell
+venv\Scripts\python -m pip install -e ".[desktop,dev]"
+venv\Scripts\python -m ruff check omnisonic tests
+venv\Scripts\python -m pytest
+```
+
+Fast tests for configuration, localization, validation, and operation state do
+not require downloading the AI model:
+
+```powershell
+venv\Scripts\python -m unittest -v tests.test_desktop_logic
+```
+
+Model-dependent LoRA tests require `OMNIVOICE_TEST_MODEL_PATH` to point to a
+local OmniVoice checkpoint.
+
+## Project structure
+
+- `omnisonic/` — desktop application, configuration, localization, and UI state;
+- `omnivoice/` — bundled upstream TTS engine, training, evaluation, and CLI tools;
+- `langs/` — Polish and English desktop translations;
+- `tests/` — lightweight desktop tests and optional model integration tests;
+- `start_desktop.bat` / `desktop_launcher.ps1` — verified Windows launcher,
+  Python bootstrap, installer, and repair entry point.
+
+## Credits and license
+
+- OmniSonic desktop application: Pates2004;
+- OmniVoice engine: Han Zhu and the
+  [k2-fsa OmniVoice contributors](https://github.com/k2-fsa/OmniVoice).
+
+Licensed under Apache-2.0. See [LICENSE](LICENSE).

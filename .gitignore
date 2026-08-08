@@ -31,6 +31,19 @@ examples/exp*
 *.jsonl
 settings.json
 start.bat 
-# Custom configs
+# Private user data. Voice presets may contain voice tokens and transcripts.
 /presets/
+**/presets/**
 /env/
+/.launcher/
+
+# One-off local migration scripts are not application source.
+/audit.py
+/audit_results.txt
+/fix_*.py
+/patch_*.py
+/refactor*.py
+/update_*.py
+
+# Separate launcher repository used for coordinated development.
+/omnivoice-local-launcher/
