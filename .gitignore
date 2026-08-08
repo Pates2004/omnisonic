@@ -47,3 +47,6 @@ start.bat
 
 # Separate launcher repository used for coordinated development.
 /omnivoice-local-launcher/
+
+# Local quarantine for obsolete scripts and reproducible build/test artifacts.
+/trash/
