@@ -168,5 +168,12 @@
     "msg_no_preset_sel": "No preset selected.",
     "msg_presets_deleted": "All presets deleted.",
     "dl_model_prompt": "Selected model ({name}) is not downloaded yet. Do you want to download and install it now?",
-    "dl_title": "Downloading model"
+    "dl_title": "Downloading model",
+    "resume_play": "Resume",
+    "auto_save_gen": "Automatically save generated audio after completion",
+    "auto_save_gen_folder": "Save generated audio directly to default folder (uncheck to prompt)",
+    "prefix_gen": "File name prefix (generated):",
+    "auto_save_rec": "Automatically save microphone recordings after completion",
+    "auto_save_rec_folder": "Save recordings directly to default folder (uncheck to prompt)",
+    "prefix_rec": "File name prefix (recorded):"
 }

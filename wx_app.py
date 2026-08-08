@@ -490,7 +490,47 @@ class SettingsDialog(wx.Dialog):
             self.chk_remember_ai.SetValue(self.cfg.get("remember_ai_settings", True))
             vbox_opts.Add(self.chk_remember_ai, 0, wx.ALL | wx.EXPAND, 5)
             
+
+            # Autosave Generated
+            self.chk_auto_gen = wx.CheckBox(tab_opts, label=self._("auto_save_gen"))
+            self.chk_auto_gen.SetName(self._("auto_save_gen"))
+            self.chk_auto_gen.SetValue(self.cfg.get("auto_save_gen", False))
+            vbox_opts.Add(self.chk_auto_gen, 0, wx.ALL | wx.EXPAND, 5)
+            
+            self.chk_auto_gen_folder = wx.CheckBox(tab_opts, label=self._("auto_save_gen_folder"))
+            self.chk_auto_gen_folder.SetName(self._("auto_save_gen_folder"))
+            self.chk_auto_gen_folder.SetValue(self.cfg.get("auto_save_gen_folder", False))
+            vbox_opts.Add(self.chk_auto_gen_folder, 0, wx.ALL | wx.EXPAND, 5)
+            
+            hbox_pref_gen = wx.BoxSizer(wx.HORIZONTAL)
+            lbl_pref_gen = wx.StaticText(tab_opts, label=self._("prefix_gen"))
+            self.txt_pref_gen = wx.TextCtrl(tab_opts, value=self.cfg.get("prefix_gen", "generated"))
+            self.txt_pref_gen.SetName(self._("prefix_gen"))
+            hbox_pref_gen.Add(lbl_pref_gen, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+            hbox_pref_gen.Add(self.txt_pref_gen, 1, wx.EXPAND)
+            vbox_opts.Add(hbox_pref_gen, 0, wx.ALL | wx.EXPAND, 5)
+            
+            # Autosave Recorded
+            self.chk_auto_rec = wx.CheckBox(tab_opts, label=self._("auto_save_rec"))
+            self.chk_auto_rec.SetName(self._("auto_save_rec"))
+            self.chk_auto_rec.SetValue(self.cfg.get("auto_save_rec", False))
+            vbox_opts.Add(self.chk_auto_rec, 0, wx.ALL | wx.EXPAND, 5)
+            
+            self.chk_auto_rec_folder = wx.CheckBox(tab_opts, label=self._("auto_save_rec_folder"))
+            self.chk_auto_rec_folder.SetName(self._("auto_save_rec_folder"))
+            self.chk_auto_rec_folder.SetValue(self.cfg.get("auto_save_rec_folder", False))
+            vbox_opts.Add(self.chk_auto_rec_folder, 0, wx.ALL | wx.EXPAND, 5)
+            
+            hbox_pref_rec = wx.BoxSizer(wx.HORIZONTAL)
+            lbl_pref_rec = wx.StaticText(tab_opts, label=self._("prefix_rec"))
+            self.txt_pref_rec = wx.TextCtrl(tab_opts, value=self.cfg.get("prefix_rec", "record"))
+            self.txt_pref_rec.SetName(self._("prefix_rec"))
+            hbox_pref_rec.Add(lbl_pref_rec, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+            hbox_pref_rec.Add(self.txt_pref_rec, 1, wx.EXPAND)
+            vbox_opts.Add(hbox_pref_rec, 0, wx.ALL | wx.EXPAND, 5)
+
             hbox_reset = wx.BoxSizer(wx.HORIZONTAL)
+
             self.btn_reset_ai = wx.Button(tab_opts, label=self._("reset_ai_btn"))
             self.btn_reset_app = wx.Button(tab_opts, label=self._("reset_app_btn"))
             
@@ -617,6 +657,12 @@ class SettingsDialog(wx.Dialog):
             self.cfg["confirm_success"] = self.chk_confirm_success.GetValue()
             self.cfg["remember_ai_settings"] = self.chk_remember_ai.GetValue()
             self.cfg["clean_temp"] = self.chk_clean_temp.GetValue()
+            self.cfg["auto_save_gen"] = self.chk_auto_gen.GetValue()
+            self.cfg["auto_save_gen_folder"] = self.chk_auto_gen_folder.GetValue()
+            self.cfg["prefix_gen"] = self.txt_pref_gen.GetValue().strip() or "generated"
+            self.cfg["auto_save_rec"] = self.chk_auto_rec.GetValue()
+            self.cfg["auto_save_rec_folder"] = self.chk_auto_rec_folder.GetValue()
+            self.cfg["prefix_rec"] = self.txt_pref_rec.GetValue().strip() or "record" 
             if hasattr(self.GetParent(), 'chk_duration'):
                 self.cfg["use_duration"] = self.GetParent().chk_duration.GetValue()
                 self.cfg["duration_val"] = self.GetParent().spin_duration.GetValue()
@@ -779,7 +825,7 @@ class OmniVoiceFrame(wx.Frame):
         self.btn_play.Bind(wx.EVT_BUTTON, self.OnPlayAudio)
         self.btn_play.Disable()
         
-        self.btn_pause = wx.Button(self.panel, label=self._("btn_pause"))
+        self.btn_pause = wx.Button(self.panel, label=self._("pause"))
         self.btn_pause.Bind(wx.EVT_BUTTON, self.OnPauseAudio)
         self.btn_pause.Disable()
         
@@ -1160,12 +1206,14 @@ class OmniVoiceFrame(wx.Frame):
         preset_path = os.path.join(PRESETS_DIR, preset) if use_preset else None
             
         def on_success():
-            self.Log(self._("ready"), success=True)
-            if self.audio_data is not None:
-                self.btn_play.Enable()
-                self.btn_save.Enable()
-                self.btn_play.SetFocus()
-                wx.Bell()
+                self.Log(self._("ready"), success=True)
+                if self.audio_data is not None:
+                    self.btn_play.Enable()
+                    self.btn_save.Enable()
+                    self.btn_play.SetFocus()
+                    wx.Bell()
+                    if self.cfg.get("auto_save_gen", False):
+                        self.PerformSaveAudio(self.audio_data, self.sample_rate, is_generated=True)
         
         self.RunOperation("op_gen_title", "op_gen_msg", self._GenCloneWorker, text, ref_audio, preset_path, ref_text, lang, speed, duration, norm_txt, success_callback=on_success)
         
@@ -1418,7 +1466,7 @@ class OmniVoiceFrame(wx.Frame):
                 
                 self.btn_play.SetLabel(self._("stop_play"))
                 self.btn_pause.Enable()
-                self.btn_pause.SetLabel(self._("btn_pause"))
+                self.btn_pause.SetLabel(self._("pause"))
                 
                 duration_ms = int((frames_left / self.sample_rate) * 1000)
                 if hasattr(self, 'play_timer'): self.play_timer.Stop()
@@ -1436,7 +1484,7 @@ class OmniVoiceFrame(wx.Frame):
             if hasattr(self, 'play_timer'): self.play_timer.Stop()
             self.btn_play.SetLabel(self._("play"))
             self.btn_pause.Disable()
-            self.btn_pause.SetLabel(self._("btn_pause"))
+            self.btn_pause.SetLabel(self._("pause"))
             self.is_paused = False
             self.current_frame = 0
 
@@ -1448,22 +1496,58 @@ class OmniVoiceFrame(wx.Frame):
             if not self.is_paused:
                 self.is_paused = True
                 if hasattr(self, 'play_timer'):
-                    # Save progress
                     elapsed_ms = self.play_timer.GetInterval() - self.play_timer.TimeRemaining()
                     self.current_frame += int((elapsed_ms / 1000) * self.sample_rate)
                     self.play_timer.Stop()
                 sd.stop()
-                self.btn_play.SetLabel(self._("resume_play"))
-                self.btn_pause.SetLabel(self._("play")) # Swap button text conceptually or just keep it "pause", actually disable it is better, no let's just make Play button "Resume"
-                self.btn_pause.Disable()
+                self.btn_pause.SetLabel(self._("resume_play"))
+        elif sd and self.btn_pause.GetLabel() == self._("resume_play"):
+            self.btn_play.SetLabel(self._("resume_play"))
+            self.OnPlayAudio(event)
                 
 
-    def OnSaveAudio(self, event):
-        if self.audio_data is not None and sf:
-            with wx.FileDialog(self, self._("save"), wildcard="WAV (*.wav)|*.wav", style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT) as fd:
+
+    def PerformSaveAudio(self, data, fs, is_generated=True):
+        import os
+        import soundfile as sf
+        import wx
+        if is_generated:
+            skip_dialog = self.cfg.get("auto_save_gen_folder", False)
+            prefix = self.cfg.get("prefix_gen", "generated")
+            folder = os.path.join(os.path.expanduser("~"), "Documents", "omnisonic", "generated")
+        else:
+            skip_dialog = self.cfg.get("auto_save_rec_folder", False)
+            prefix = self.cfg.get("prefix_rec", "record")
+            folder = os.path.join(os.path.expanduser("~"), "Documents", "omnisonic", "recorded")
+            
+        os.makedirs(folder, exist_ok=True)
+        idx = 1
+        while True:
+            fname = f"{prefix}_{idx}.wav"
+            if not os.path.exists(os.path.join(folder, fname)):
+                break
+            idx += 1
+            
+        if skip_dialog:
+            path = os.path.join(folder, fname)
+            sf.write(path, data, fs)
+            if self.cfg.get("confirm_success", False):
+                wx.MessageBox(self._("msg_save_ok") + f"\n{path}", self._("title_save"), wx.OK | wx.ICON_INFORMATION)
+            return path
+        else:
+            with wx.FileDialog(self, self._("save"), defaultDir=folder, defaultFile=fname, wildcard="WAV (*.wav)|*.wav", style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT) as fd:
                 if fd.ShowModal() != wx.ID_CANCEL:
-                    sf.write(fd.GetPath(), self.audio_data, self.sample_rate)
-                    wx.MessageBox(self._("msg_save_ok"), self._("title_save"), wx.OK | wx.ICON_INFORMATION)
+                    path = fd.GetPath()
+                    sf.write(path, data, fs)
+                    if self.cfg.get("confirm_success", False):
+                        wx.MessageBox(self._("msg_save_ok") + f"\n{path}", self._("title_save"), wx.OK | wx.ICON_INFORMATION)
+                    return path
+        return None
+
+    def OnSaveAudio(self, event):
+        if self.audio_data is not None:
+            self.PerformSaveAudio(self.audio_data, self.sample_rate, is_generated=True)
+
 
     def TogglePlayFile(self, btn, path_ctrl):
         if btn.GetLabel() == self._("play_ref"):
@@ -1510,6 +1594,8 @@ class OmniVoiceFrame(wx.Frame):
                 sf.write(path, audio, self.rec_fs)
                 path_ctrl.SetValue(path)
                 wx.Bell()
+                if self.cfg.get("auto_save_rec", False):
+                    self.PerformSaveAudio(audio, self.rec_fs, is_generated=False)
 
 
 
