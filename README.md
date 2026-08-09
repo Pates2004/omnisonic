@@ -95,9 +95,11 @@ rebuild its voice data from a new source recording. The original audio path is
 not embedded in a preset, so choosing a replacement file during editing is
 optional.
 
-Generated and recorded WAV files are saved under
-`Documents\OmniSonic\generated` and `Documents\OmniSonic\recorded`, unless the
-user chooses another location.
+Generated and recorded WAV files default to
+`Documents\OmniSonic\generated` and `Documents\OmniSonic\record`. Both folders
+can be entered directly or selected with **Browse** in settings. The related
+checkbox chooses between saving directly to that configured folder and asking
+for a destination each time.
 
 ## Development
 

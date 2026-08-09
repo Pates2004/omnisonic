@@ -11,6 +11,7 @@ from omnisonic.config import (
     DEFAULT_CONFIG,
     PRESETS_DIR,
     PROJECT_ROOT,
+    default_audio_directory,
     load_config,
     normalize_config,
     save_config,
@@ -32,6 +33,32 @@ from omnisonic.validation import (
 class ConfigTests(unittest.TestCase):
     def test_presets_are_portable_and_live_next_to_the_program(self):
         self.assertEqual(PRESETS_DIR, PROJECT_ROOT / "presets")
+
+    def test_audio_output_directories_have_expected_defaults(self):
+        self.assertEqual(
+            DEFAULT_CONFIG["generated_audio_directory"],
+            str(default_audio_directory("generated")),
+        )
+        self.assertEqual(
+            DEFAULT_CONFIG["recorded_audio_directory"],
+            str(default_audio_directory("record")),
+        )
+        self.assertEqual(Path(DEFAULT_CONFIG["generated_audio_directory"]).name, "generated")
+        self.assertEqual(Path(DEFAULT_CONFIG["recorded_audio_directory"]).name, "record")
+
+    def test_invalid_audio_output_directories_fall_back_to_defaults(self):
+        result = normalize_config(
+            {
+                "generated_audio_directory": None,
+                "recorded_audio_directory": "   ",
+            }
+        )
+        self.assertEqual(
+            result["generated_audio_directory"], DEFAULT_CONFIG["generated_audio_directory"]
+        )
+        self.assertEqual(
+            result["recorded_audio_directory"], DEFAULT_CONFIG["recorded_audio_directory"]
+        )
 
     def test_normalize_config_repairs_invalid_values(self):
         result = normalize_config(
@@ -338,6 +365,51 @@ class DesktopSourceTests(unittest.TestCase):
                 "fade_duration",
             },
         )
+
+    def test_settings_dialog_has_standard_keyboard_buttons(self):
+        source, tree = self._app_tree()
+        settings = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "SettingsDialog"
+        )
+        init_ui = next(
+            node
+            for node in settings.body
+            if isinstance(node, ast.FunctionDef) and node.name == "InitUI"
+        )
+        button_ids = {
+            ast.unparse(call.args[1])
+            for call in ast.walk(init_ui)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "Button"
+            and len(call.args) >= 2
+        }
+        self.assertIn("wx.ID_OK", button_ids)
+        self.assertIn("wx.ID_CANCEL", button_ids)
+        self.assertIn("self.btn_ok.SetDefault()", source)
+        self.assertIn("self.SetEscapeId(wx.ID_CANCEL)", source)
+
+    def test_audio_saving_uses_configured_directories(self):
+        _source, tree = self._app_tree()
+        frame = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "OmniVoiceFrame"
+        )
+        save_audio = next(
+            node
+            for node in frame.body
+            if isinstance(node, ast.FunctionDef) and node.name == "PerformSaveAudio"
+        )
+        constants = {
+            node.value
+            for node in ast.walk(save_audio)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        self.assertIn("generated_audio_directory", constants)
+        self.assertIn("recorded_audio_directory", constants)
 
 
 if __name__ == "__main__":

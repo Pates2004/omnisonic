@@ -2,6 +2,7 @@ import ctypes
 import logging
 import os
 import threading
+from pathlib import Path
 
 import wx
 import wx.lib.scrolledpanel as scrolled
@@ -832,6 +833,24 @@ class SettingsDialog(wx.Dialog):
             self.chk_auto_gen_folder.SetValue(self.cfg.get("auto_save_gen_folder", False))
             vbox_opts.Add(self.chk_auto_gen_folder, 0, wx.ALL | wx.EXPAND, 5)
 
+            gen_folder_label = wx.StaticText(tab_opts, label=self._("generated_folder_lbl"))
+            vbox_opts.Add(gen_folder_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
+            gen_folder_row = wx.BoxSizer(wx.HORIZONTAL)
+            self.txt_gen_folder = wx.TextCtrl(
+                tab_opts,
+                value=self.cfg.get(
+                    "generated_audio_directory", str(default_audio_directory("generated"))
+                ),
+            )
+            self.txt_gen_folder.SetName(self._("generated_folder_lbl"))
+            gen_folder_row.Add(self.txt_gen_folder, 1, wx.EXPAND | wx.RIGHT, 5)
+            btn_gen_folder = wx.Button(tab_opts, label=self._("browse"))
+            btn_gen_folder.Bind(
+                wx.EVT_BUTTON, lambda event: self.BrowseForDirectory(self.txt_gen_folder)
+            )
+            gen_folder_row.Add(btn_gen_folder, 0, wx.EXPAND)
+            vbox_opts.Add(gen_folder_row, 0, wx.ALL | wx.EXPAND, 5)
+
             hbox_pref_gen = wx.BoxSizer(wx.HORIZONTAL)
             lbl_pref_gen = wx.StaticText(tab_opts, label=self._("prefix_gen"))
             self.txt_pref_gen = wx.TextCtrl(tab_opts, value=self.cfg.get("prefix_gen", "generated"))
@@ -850,6 +869,24 @@ class SettingsDialog(wx.Dialog):
             self.chk_auto_rec_folder.SetName(self._("auto_save_rec_folder"))
             self.chk_auto_rec_folder.SetValue(self.cfg.get("auto_save_rec_folder", False))
             vbox_opts.Add(self.chk_auto_rec_folder, 0, wx.ALL | wx.EXPAND, 5)
+
+            rec_folder_label = wx.StaticText(tab_opts, label=self._("recorded_folder_lbl"))
+            vbox_opts.Add(rec_folder_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
+            rec_folder_row = wx.BoxSizer(wx.HORIZONTAL)
+            self.txt_rec_folder = wx.TextCtrl(
+                tab_opts,
+                value=self.cfg.get(
+                    "recorded_audio_directory", str(default_audio_directory("record"))
+                ),
+            )
+            self.txt_rec_folder.SetName(self._("recorded_folder_lbl"))
+            rec_folder_row.Add(self.txt_rec_folder, 1, wx.EXPAND | wx.RIGHT, 5)
+            btn_rec_folder = wx.Button(tab_opts, label=self._("browse"))
+            btn_rec_folder.Bind(
+                wx.EVT_BUTTON, lambda event: self.BrowseForDirectory(self.txt_rec_folder)
+            )
+            rec_folder_row.Add(btn_rec_folder, 0, wx.EXPAND)
+            vbox_opts.Add(rec_folder_row, 0, wx.ALL | wx.EXPAND, 5)
 
             hbox_pref_rec = wx.BoxSizer(wx.HORIZONTAL)
             lbl_pref_rec = wx.StaticText(tab_opts, label=self._("prefix_rec"))
@@ -877,19 +914,53 @@ class SettingsDialog(wx.Dialog):
         vbox_main.Add(notebook, 1, wx.EXPAND | wx.ALL, 5)
 
         hbox = wx.BoxSizer(wx.HORIZONTAL)
-        btn_ok = wx.Button(panel, label=self._("btn_save"))
-        btn_cancel = wx.Button(panel, label=self._("btn_cancel"))
+        self.btn_ok = wx.Button(panel, wx.ID_OK, self._("btn_save"))
+        self.btn_cancel = wx.Button(panel, wx.ID_CANCEL, self._("btn_cancel"))
 
-        btn_ok.Bind(wx.EVT_BUTTON, self.OnSave)
-        btn_cancel.Bind(wx.EVT_BUTTON, self.OnCancel)
+        self.btn_ok.Bind(wx.EVT_BUTTON, self.OnSave)
+        self.btn_cancel.Bind(wx.EVT_BUTTON, self.OnCancel)
+        self.btn_ok.SetDefault()
+        self.SetAffirmativeId(wx.ID_OK)
+        self.SetEscapeId(wx.ID_CANCEL)
 
-        hbox.Add(btn_ok, 1, wx.EXPAND | wx.RIGHT, 5)
-        hbox.Add(btn_cancel, 1, wx.EXPAND, 0)
+        hbox.Add(self.btn_ok, 1, wx.EXPAND | wx.RIGHT, 5)
+        hbox.Add(self.btn_cancel, 1, wx.EXPAND, 0)
 
         vbox_main.Add(hbox, 0, wx.ALL | wx.EXPAND, 5)
 
         panel.SetSizer(vbox_main)
         self.Bind(wx.EVT_CLOSE, self.OnClose)
+
+    def BrowseForDirectory(self, target_ctrl):
+        raw_path = target_ctrl.GetValue().strip()
+        default_path = ""
+        if raw_path:
+            candidate = Path(os.path.expandvars(raw_path)).expanduser()
+            while not candidate.is_dir() and candidate != candidate.parent:
+                candidate = candidate.parent
+            if candidate.is_dir():
+                default_path = str(candidate)
+
+        with wx.DirDialog(
+            self,
+            self._("select_folder_title"),
+            defaultPath=default_path,
+            style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST,
+        ) as dialog:
+            if dialog.ShowModal() == wx.ID_OK:
+                target_ctrl.SetValue(dialog.GetPath())
+
+    def _validated_audio_directory(self, control, label_key):
+        raw_path = control.GetValue().strip()
+        if not raw_path:
+            raise ValueError(self._("folder_path_empty").format(name=self._(label_key)))
+        expanded = os.path.expandvars(os.path.expanduser(raw_path))
+        path = Path(os.path.abspath(expanded))
+        if path.exists() and not path.is_dir():
+            raise ValueError(
+                self._("folder_path_is_file").format(name=self._(label_key), path=path)
+            )
+        return str(path)
 
     def SetupShortcutsTab(self, tab):
         self.shortcut_bindings = dict(
@@ -1131,9 +1202,11 @@ class SettingsDialog(wx.Dialog):
             self.chk_clean_temp.SetValue(defaults["clean_temp"])
             self.chk_auto_gen.SetValue(defaults["auto_save_gen"])
             self.chk_auto_gen_folder.SetValue(defaults["auto_save_gen_folder"])
+            self.txt_gen_folder.SetValue(defaults["generated_audio_directory"])
             self.txt_pref_gen.SetValue(defaults["prefix_gen"])
             self.chk_auto_rec.SetValue(defaults["auto_save_rec"])
             self.chk_auto_rec_folder.SetValue(defaults["auto_save_rec_folder"])
+            self.txt_rec_folder.SetValue(defaults["recorded_audio_directory"])
             self.txt_pref_rec.SetValue(defaults["prefix_rec"])
             self.cfg.update(defaults)
             self._restore_shortcut_defaults()
@@ -1201,9 +1274,15 @@ class SettingsDialog(wx.Dialog):
                 prefix_rec = validate_filename_component(
                     self.txt_pref_rec.GetValue(), label=self._("prefix_rec")
                 )
-            except ValueError as exc:
+                generated_directory = self._validated_audio_directory(
+                    self.txt_gen_folder, "generated_folder_lbl"
+                )
+                recorded_directory = self._validated_audio_directory(
+                    self.txt_rec_folder, "recorded_folder_lbl"
+                )
+            except (OSError, ValueError) as exc:
                 wx.MessageBox(
-                    self._("invalid_filename").format(error=str(exc)),
+                    self._("invalid_settings_value").format(error=str(exc)),
                     self._("error_title"),
                     wx.OK | wx.ICON_ERROR,
                 )
@@ -1266,9 +1345,11 @@ class SettingsDialog(wx.Dialog):
             self.cfg["preload_asr"] = self.chk_preload_asr.GetValue()
             self.cfg["auto_save_gen"] = self.chk_auto_gen.GetValue()
             self.cfg["auto_save_gen_folder"] = self.chk_auto_gen_folder.GetValue()
+            self.cfg["generated_audio_directory"] = generated_directory
             self.cfg["prefix_gen"] = prefix_gen
             self.cfg["auto_save_rec"] = self.chk_auto_rec.GetValue()
             self.cfg["auto_save_rec_folder"] = self.chk_auto_rec_folder.GetValue()
+            self.cfg["recorded_audio_directory"] = recorded_directory
             self.cfg["prefix_rec"] = prefix_rec
             if hasattr(self.GetParent(), "chk_duration"):
                 self.cfg["use_duration"] = self.GetParent().chk_duration.GetValue()
@@ -1288,6 +1369,9 @@ class SettingsDialog(wx.Dialog):
         self.HandleCancel(event)
 
     def HandleCancel(self, event=None):
+        if not self.is_first_run:
+            self.EndModal(wx.ID_CANCEL)
+            return
         dlg = wx.MessageDialog(
             self, self._("exit_confirm"), self._("warning_title"), wx.YES_NO | wx.ICON_QUESTION
         )
@@ -2954,13 +3038,22 @@ class OmniVoiceFrame(wx.Frame):
         if is_generated:
             skip_dialog = self.cfg.get("auto_save_gen_folder", False) and not force_dialog
             prefix = self.cfg.get("prefix_gen", "generated")
-            folder = default_audio_directory("generated")
+            configured_folder = self.cfg.get(
+                "generated_audio_directory", str(default_audio_directory("generated"))
+            )
         else:
             skip_dialog = self.cfg.get("auto_save_rec_folder", False) and not force_dialog
             prefix = self.cfg.get("prefix_rec", "record")
-            folder = default_audio_directory("recorded")
+            configured_folder = self.cfg.get(
+                "recorded_audio_directory", str(default_audio_directory("record"))
+            )
 
         prefix = validate_filename_component(prefix, label="audio prefix")
+        folder = Path(
+            os.path.abspath(os.path.expandvars(os.path.expanduser(str(configured_folder))))
+        )
+        if folder.exists() and not folder.is_dir():
+            raise NotADirectoryError(str(folder))
         folder.mkdir(parents=True, exist_ok=True)
         idx = 1
         while True:

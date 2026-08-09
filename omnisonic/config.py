@@ -60,6 +60,14 @@ PRESETS_DIR = PROGRAM_DIR / "presets"
 TEMP_DIR = APP_DATA_DIR / "temp"
 RECORDED_AUDIO_FILE = TEMP_DIR / "recorded_reference.wav"
 
+
+def default_audio_directory(kind: str) -> Path:
+    documents = Path.home() / "Documents"
+    if os.name == "nt" or documents.exists():
+        return documents / APP_NAME / kind
+    return APP_DATA_DIR / "audio" / kind
+
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "language": "en",
     "theme": "light",
@@ -102,9 +110,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "warn_delete_preset": True,
     "auto_save_gen": False,
     "auto_save_gen_folder": False,
+    "generated_audio_directory": str(default_audio_directory("generated")),
     "prefix_gen": "generated",
     "auto_save_rec": False,
     "auto_save_rec_folder": False,
+    "recorded_audio_directory": str(default_audio_directory("record")),
     "prefix_rec": "record",
     "shortcuts_enabled": True,
     "shortcut_bindings": default_shortcut_bindings(),
@@ -159,7 +169,14 @@ def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         result["theme"] = "light"
     if result.get("preset_display_mode") not in {"name", "path", "name_path"}:
         result["preset_display_mode"] = "name"
-    for key in ("language", "asr_model_name", "prefix_gen", "prefix_rec"):
+    for key in (
+        "language",
+        "asr_model_name",
+        "prefix_gen",
+        "prefix_rec",
+        "generated_audio_directory",
+        "recorded_audio_directory",
+    ):
         if not isinstance(result.get(key), str) or not result[key].strip():
             result[key] = DEFAULT_CONFIG[key]
         else:
@@ -245,10 +262,3 @@ def migrate_legacy_user_data() -> None:
 def locale_search_directories() -> tuple[Path, ...]:
     """Return packaged and source-checkout locale locations."""
     return (PACKAGE_DIR / "langs", PROJECT_ROOT / "langs")
-
-
-def default_audio_directory(kind: str) -> Path:
-    documents = Path.home() / "Documents"
-    if documents.exists():
-        return documents / APP_NAME / kind
-    return APP_DATA_DIR / "audio" / kind
