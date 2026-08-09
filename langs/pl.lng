@@ -84,6 +84,7 @@
     "btn_save": "Zapisz",
     "btn_cancel": "Anuluj",
     "exit_confirm": "Czy na pewno chcesz przerwać pierwszą konfigurację i zamknąć program?",
+    "discard_settings_confirm": "Ustawienia zostały zmienione. Czy na pewno chcesz wyjść bez zapisywania?",
     "stop_confirm": "Czy na pewno chcesz przerwać obecną operację?",
     "close_busy": "Trwa operacja w tle. Czy na pewno chcesz zamknąć program?",
     "close_warn": "Czy na pewno chcesz wyjść z programu?",

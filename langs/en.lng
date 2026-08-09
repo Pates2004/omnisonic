@@ -81,6 +81,7 @@
     "btn_save": "Save",
     "btn_cancel": "Cancel",
     "exit_confirm": "Are you sure you want to cancel the initial setup and exit the program?",
+    "discard_settings_confirm": "Settings have changed. Are you sure you want to exit without saving?",
     "stop_confirm": "Are you sure you want to stop the current operation?",
     "close_busy": "An operation is running in the background. Are you sure you want to exit?",
     "close_warn": "Are you sure you want to exit the program?",

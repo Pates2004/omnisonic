@@ -2,6 +2,7 @@ import ctypes
 import logging
 import os
 import threading
+from copy import deepcopy
 from pathlib import Path
 
 import wx
@@ -660,7 +661,9 @@ class SettingsDialog(wx.Dialog):
         title = self._("first_run_title") if is_first_run else self._("settings_title")
         super(SettingsDialog, self).__init__(parent, title=title, size=(620, 680))
 
+        self._initial_parent_ai_state = self._capture_parent_ai_state()
         self.InitUI()
+        self._initial_settings_state = self._collect_settings_state()
         self.Centre()
 
     def _(self, key):
@@ -961,6 +964,99 @@ class SettingsDialog(wx.Dialog):
                 self._("folder_path_is_file").format(name=self._(label_key), path=path)
             )
         return str(path)
+
+    def _capture_parent_ai_state(self):
+        parent = self.GetParent()
+        if not parent or not hasattr(parent, "spin_steps"):
+            return None
+        return {
+            "ai_steps": parent.spin_steps.GetValue(),
+            "ai_cfg": parent.spin_cfg.GetValue(),
+            "ai_speed": parent.spin_speed.GetValue(),
+            "ai_denoise": parent.chk_denoise.GetValue(),
+            "ai_t_shift": parent.spin_t_shift.GetValue(),
+            "ai_layer_penalty_factor": parent.spin_layer_penalty.GetValue(),
+            "ai_position_temperature": parent.spin_position_temperature.GetValue(),
+            "ai_class_temperature": parent.spin_class_temperature.GetValue(),
+            "ai_preprocess_prompt": parent.chk_preprocess_prompt.GetValue(),
+            "ai_postprocess_output": parent.chk_postprocess_output.GetValue(),
+            "ai_audio_chunk_duration": parent.spin_chunk_duration.GetValue(),
+            "ai_audio_chunk_threshold": parent.spin_chunk_threshold.GetValue(),
+            "ai_pad_duration": parent.spin_pad_duration.GetValue(),
+            "ai_fade_duration": parent.spin_fade_duration.GetValue(),
+            "clone_instruct": parent.clone_instruct.GetValue(),
+            "design_instruct": parent.design_custom_instruct.GetValue(),
+            "use_duration": parent.chk_duration.GetValue(),
+            "duration_val": parent.spin_duration.GetValue(),
+        }
+
+    def _restore_parent_ai_state(self):
+        state = self._initial_parent_ai_state
+        parent = self.GetParent()
+        if not state or not parent or not hasattr(parent, "spin_steps"):
+            return
+        parent.spin_steps.SetValue(state["ai_steps"])
+        parent.spin_cfg.SetValue(str(state["ai_cfg"]))
+        parent.spin_speed.SetValue(str(state["ai_speed"]))
+        parent.chk_denoise.SetValue(state["ai_denoise"])
+        parent.spin_t_shift.SetValue(str(state["ai_t_shift"]))
+        parent.spin_layer_penalty.SetValue(str(state["ai_layer_penalty_factor"]))
+        parent.spin_position_temperature.SetValue(str(state["ai_position_temperature"]))
+        parent.spin_class_temperature.SetValue(str(state["ai_class_temperature"]))
+        parent.chk_preprocess_prompt.SetValue(state["ai_preprocess_prompt"])
+        parent.chk_postprocess_output.SetValue(state["ai_postprocess_output"])
+        parent.spin_chunk_duration.SetValue(str(state["ai_audio_chunk_duration"]))
+        parent.spin_chunk_threshold.SetValue(str(state["ai_audio_chunk_threshold"]))
+        parent.spin_pad_duration.SetValue(str(state["ai_pad_duration"]))
+        parent.spin_fade_duration.SetValue(str(state["ai_fade_duration"]))
+        parent.clone_instruct.SetValue(state["clone_instruct"])
+        parent.design_custom_instruct.SetValue(state["design_instruct"])
+        parent.chk_duration.SetValue(state["use_duration"])
+        parent.spin_duration.SetValue(state["duration_val"])
+
+    def _collect_settings_state(self):
+        state = {
+            "config": deepcopy(self.cfg),
+            "language": self.cb_lang.GetSelection(),
+            "theme": self.cb_theme.GetSelection(),
+            "font_size": self.spin_font.GetValue(),
+        }
+        if self.is_first_run:
+            return state
+
+        state.update(
+            {
+                "hide_console": self.chk_hide_console.GetValue(),
+                "preset_display": self.cb_preset_disp.GetSelection(),
+                "asr_model": self.cb_asr.GetValue(),
+                "preload_asr": self.chk_preload_asr.GetValue(),
+                "clean_temp": self.chk_clean_temp.GetValue(),
+                "force_splash": self.chk_force_splash.GetValue(),
+                "show_progress": self.chk_show_progress.GetValue(),
+                "fake_progress": self.chk_fake_progress.GetValue(),
+                "native_dialogs": self.chk_use_native.GetValue(),
+                "warn_exit": self.chk_warn_exit.GetValue(),
+                "confirm_success": self.chk_confirm_success.GetValue(),
+                "remember_ai": self.chk_remember_ai.GetValue(),
+                "normalize_text": self.chk_normalize_text.GetValue(),
+                "auto_save_generated": self.chk_auto_gen.GetValue(),
+                "direct_save_generated": self.chk_auto_gen_folder.GetValue(),
+                "generated_directory": self.txt_gen_folder.GetValue(),
+                "generated_prefix": self.txt_pref_gen.GetValue(),
+                "auto_save_recorded": self.chk_auto_rec.GetValue(),
+                "direct_save_recorded": self.chk_auto_rec_folder.GetValue(),
+                "recorded_directory": self.txt_rec_folder.GetValue(),
+                "recorded_prefix": self.txt_pref_rec.GetValue(),
+                "shortcuts_enabled": self.chk_shortcuts_enabled.GetValue(),
+                "shortcut_bindings": deepcopy(self.shortcut_bindings),
+                "shortcut_enabled": deepcopy(self.shortcut_enabled),
+                "parent_ai": self._capture_parent_ai_state(),
+            }
+        )
+        return state
+
+    def _has_unsaved_changes(self):
+        return self._collect_settings_state() != self._initial_settings_state
 
     def SetupShortcutsTab(self, tab):
         self.shortcut_bindings = dict(
@@ -1370,6 +1466,21 @@ class SettingsDialog(wx.Dialog):
 
     def HandleCancel(self, event=None):
         if not self.is_first_run:
+            has_unsaved_changes = self._has_unsaved_changes()
+            if has_unsaved_changes:
+                confirmed = (
+                    wx.MessageBox(
+                        self._("discard_settings_confirm"),
+                        self._("warning_title"),
+                        wx.YES_NO | wx.ICON_WARNING,
+                    )
+                    == wx.YES
+                )
+                if not confirmed:
+                    if isinstance(event, wx.CloseEvent):
+                        event.Veto()
+                    return
+                self._restore_parent_ai_state()
             self.EndModal(wx.ID_CANCEL)
             return
         dlg = wx.MessageDialog(

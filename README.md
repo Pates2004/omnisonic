@@ -65,6 +65,10 @@ one global checkbox, and the default assignments can be restored at any time.
 `Ctrl+Shift+S` creates a preset from the reference audio currently loaded on
 the **Voice Clone** tab and asks for its name.
 
+In the settings dialog, Enter activates **Save** and Escape cancels. Escape
+closes immediately when nothing changed and asks before discarding unsaved
+changes otherwise.
+
 Manual setup:
 
 ```powershell

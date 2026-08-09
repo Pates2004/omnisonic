@@ -411,6 +411,23 @@ class DesktopSourceTests(unittest.TestCase):
         self.assertIn("generated_audio_directory", constants)
         self.assertIn("recorded_audio_directory", constants)
 
+    def test_settings_cancel_checks_for_unsaved_changes(self):
+        _source, tree = self._app_tree()
+        settings = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "SettingsDialog"
+        )
+        handle_cancel = next(
+            node
+            for node in settings.body
+            if isinstance(node, ast.FunctionDef) and node.name == "HandleCancel"
+        )
+        cancel_source = ast.unparse(handle_cancel)
+        self.assertIn("self._has_unsaved_changes()", cancel_source)
+        self.assertIn("self._restore_parent_ai_state()", cancel_source)
+        self.assertIn("self._('discard_settings_confirm')", cancel_source)
+
 
 if __name__ == "__main__":
     unittest.main()
