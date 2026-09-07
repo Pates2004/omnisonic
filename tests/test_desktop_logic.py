@@ -515,6 +515,25 @@ class DesktopSourceTests(unittest.TestCase):
         self.assertIn("'attn_implementation': 'sdpa'", function_source)
         self.assertIn("'asr_device': device", function_source)
 
+    def test_bundled_inference_entry_points_use_portable_dtype_and_sdpa(self):
+        root = Path(__file__).resolve().parents[1]
+        for relative_path in ("cli/demo.py", "cli/infer.py", "cli/infer_batch.py"):
+            with self.subTest(relative_path=relative_path):
+                tree = ast.parse((root / "omnivoice" / relative_path).read_text(encoding="utf-8"))
+                model_loads = [
+                    node
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "from_pretrained"
+                    and any(keyword.arg == "device_map" for keyword in node.keywords)
+                ]
+                self.assertTrue(model_loads)
+                keywords = {keyword.arg: keyword.value for keyword in model_loads[0].keywords}
+                self.assertIsInstance(keywords["dtype"], ast.Call)
+                self.assertEqual(ast.unparse(keywords["dtype"].func), "get_preferred_dtype")
+                self.assertEqual(ast.literal_eval(keywords["attn_implementation"]), "sdpa")
+
     def test_installer_backend_matrix_is_complete_and_detached_from_pyproject(self):
         root = Path(__file__).resolve().parents[1]
         matrix = json.loads((root / "installer_backends.json").read_text(encoding="utf-8"))
