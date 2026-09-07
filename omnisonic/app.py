@@ -8,6 +8,13 @@ from pathlib import Path
 import wx
 import wx.lib.scrolledpanel as scrolled
 
+from . import __version__
+from .accelerator import (
+    detect_accelerator,
+    empty_accelerator_cache,
+    format_diagnostics,
+    preferred_dtype,
+)
 from .config import (
     CONFIG_FILE,
     DEFAULT_CONFIG,
@@ -39,8 +46,8 @@ sd = None
 OmniVoice = None
 OmniVoiceGenerationConfig = None
 VoiceClonePrompt = None
-get_best_device = None
 load_waveform = None
+accelerator_info = None
 
 _ALL_LANGUAGES = ["Auto"]
 
@@ -202,7 +209,7 @@ def _shortcut_from_key_event(event):
 
 def LoadRuntimeDependencies():
     global torch, np, sf, sd, OmniVoice, OmniVoiceGenerationConfig
-    global VoiceClonePrompt, get_best_device, load_waveform, _ALL_LANGUAGES
+    global VoiceClonePrompt, load_waveform, accelerator_info, _ALL_LANGUAGES
 
     import numpy as _np
     import sounddevice as _sd
@@ -211,7 +218,6 @@ def LoadRuntimeDependencies():
     from omnivoice import OmniVoice as _OV
     from omnivoice import OmniVoiceGenerationConfig as _OVC
     from omnivoice import VoiceClonePrompt as _VCP
-    from omnivoice.utils.common import get_best_device as _gbd
     from omnivoice.utils.audio import load_waveform as _load_waveform
     from omnivoice.utils.lang_map import LANG_NAMES, lang_display_name
 
@@ -222,8 +228,8 @@ def LoadRuntimeDependencies():
     OmniVoice = _OV
     OmniVoiceGenerationConfig = _OVC
     VoiceClonePrompt = _VCP
-    get_best_device = _gbd
     load_waveform = _load_waveform
+    accelerator_info = detect_accelerator(_torch)
     _ALL_LANGUAGES[:] = ["Auto"] + sorted(lang_display_name(n) for n in LANG_NAMES)
 
 
@@ -780,6 +786,25 @@ class SettingsDialog(wx.Dialog):
             self.btn_clean_temp = wx.Button(tab_sys, label=self._("clean_temp_btn"))
             self.btn_clean_temp.Bind(wx.EVT_BUTTON, self.OnCleanTemp)
             vbox_sys.Add(self.btn_clean_temp, 0, wx.ALL | wx.EXPAND, 5)
+
+            diagnostics_box = wx.StaticBoxSizer(
+                wx.VERTICAL, tab_sys, label=self._("acceleration_diagnostics")
+            )
+            diagnostics_parent = diagnostics_box.GetStaticBox()
+            self.txt_diagnostics = wx.TextCtrl(
+                diagnostics_parent,
+                value=format_diagnostics(__version__, torch),
+                style=wx.TE_MULTILINE | wx.TE_READONLY,
+                size=(-1, 190),
+            )
+            self.txt_diagnostics.SetName(self._("acceleration_diagnostics"))
+            diagnostics_box.Add(self.txt_diagnostics, 1, wx.ALL | wx.EXPAND, 5)
+            self.btn_copy_diagnostics = wx.Button(
+                diagnostics_parent, label=self._("copy_diagnostics")
+            )
+            self.btn_copy_diagnostics.Bind(wx.EVT_BUTTON, self.OnCopyDiagnostics)
+            diagnostics_box.Add(self.btn_copy_diagnostics, 0, wx.ALL | wx.EXPAND, 5)
+            vbox_sys.Add(diagnostics_box, 0, wx.ALL | wx.EXPAND, 5)
             tab_sys.SetSizer(vbox_sys)
             tab_sys.SetupScrolling(scroll_x=False)
 
@@ -1354,6 +1379,25 @@ class SettingsDialog(wx.Dialog):
         else:
             wx.MessageBox(
                 self._("clean_none"), self._("success_title"), wx.OK | wx.ICON_INFORMATION
+            )
+
+    def OnCopyDiagnostics(self, event):
+        if wx.TheClipboard.Open():
+            try:
+                wx.TheClipboard.SetData(wx.TextDataObject(self.txt_diagnostics.GetValue()))
+                wx.TheClipboard.Flush()
+            finally:
+                wx.TheClipboard.Close()
+            wx.MessageBox(
+                self._("diagnostics_copied"),
+                self._("info_title"),
+                wx.OK | wx.ICON_INFORMATION,
+            )
+        else:
+            wx.MessageBox(
+                self._("clipboard_failed"),
+                self._("error_title"),
+                wx.OK | wx.ICON_ERROR,
             )
 
     def OnSave(self, event):
@@ -2452,8 +2496,8 @@ class OmniVoiceFrame(wx.Frame):
 
             def on_success(_result):
                 self.model = None
-                if torch and torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                if torch and accelerator_info:
+                    empty_accelerator_cache(accelerator_info, torch)
                 self.btn_toggle_model.SetLabel(self._("load_model"))
                 self.Log(self._("model_unloaded"), success=True)
                 wx.Bell()
@@ -2467,12 +2511,14 @@ class OmniVoiceFrame(wx.Frame):
 
     def _LoadModelWorker(self, state):
         state.check_cancelled()
-        device = get_best_device()
-        dtype = torch.float16 if str(device).startswith(("cuda", "xpu")) else torch.float32
+        device = accelerator_info.device
+        dtype = preferred_dtype(accelerator_info, torch)
         kwargs = {
             "device_map": device,
             "dtype": dtype,
             "load_asr": self.cfg.get("preload_asr", False),
+            "asr_device": device,
+            "attn_implementation": "sdpa",
         }
         asr_name = self.cfg.get("asr_model_name")
         if asr_name:

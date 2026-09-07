@@ -35,6 +35,12 @@ start.bat
 /presets/
 **/presets/**
 /env/
+/env.new/
+/env.old/
+/env.failed/
+/venv.new/
+/venv.old/
+/venv.failed/
 /.launcher/
 
 # One-off local migration scripts are not application source.

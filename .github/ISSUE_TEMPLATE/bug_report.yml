@@ -21,7 +21,7 @@ body:
     attributes:
       label: Environment Details
       description: "Provide details including OS, GPU info, Python version, any relevant software or dependencies, and training/finetuning configuration (if applicable)."
-      placeholder: e.g., Ubuntu 20.04.6 LTS, 4 * H20, Python 3.13, torch==2.8.0+cu128, cuda 12.8
+      placeholder: Paste the report from Settings > System > Copy diagnostics, or provide OS, GPU, backend, Python, torch and runtime versions.
     validations:
       required: true
   - type: textarea

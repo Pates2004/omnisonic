@@ -6,7 +6,9 @@ import string
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
+from omnisonic.accelerator import detect_accelerator, validate_accelerator
 from omnisonic.config import (
     DEFAULT_CONFIG,
     PRESETS_DIR,
@@ -190,6 +192,90 @@ class OperationTests(unittest.TestCase):
         execute_worker(state, cancel)
         self.assertFalse(state.succeeded)
         self.assertTrue(state.cancel_flag)
+
+
+class _FakeTensor:
+    def __init__(self, device):
+        self.device = SimpleNamespace(type=device.split(":", 1)[0])
+        self.is_cuda = self.device.type == "cuda"
+
+    def __matmul__(self, other):
+        return _FakeTensor(self.device.type)
+
+    def all(self):
+        return self
+
+    def item(self):
+        return True
+
+
+class _FakeDeviceApi:
+    def __init__(self, available, name):
+        self._available = available
+        self._name = name
+        self.synchronized = False
+        self.cache_emptied = False
+
+    def is_available(self):
+        return self._available
+
+    def get_device_name(self, index):
+        return self._name
+
+    def synchronize(self):
+        self.synchronized = True
+
+    def empty_cache(self):
+        self.cache_emptied = True
+
+
+class _FakeTorch:
+    __version__ = "2.test"
+    float16 = "float16"
+    float32 = "float32"
+
+    def __init__(self, *, cuda=None, hip=None, xpu=False):
+        self.version = SimpleNamespace(cuda=cuda, hip=hip, xpu="oneAPI" if xpu else None)
+        self.cuda = _FakeDeviceApi(cuda is not None or hip is not None, "Test CUDA/HIP GPU")
+        self.xpu = _FakeDeviceApi(xpu, "Test Intel Arc")
+
+    @staticmethod
+    def randn(shape, device, dtype):
+        return _FakeTensor(device)
+
+    @staticmethod
+    def isfinite(tensor):
+        return tensor
+
+
+class AcceleratorTests(unittest.TestCase):
+    def test_cuda_and_rocm_share_cuda_device_api_but_keep_distinct_backends(self):
+        cuda = detect_accelerator(_FakeTorch(cuda="13.0"))
+        rocm = detect_accelerator(_FakeTorch(hip="7.2.1"))
+        self.assertEqual((cuda.backend, cuda.device), ("cuda", "cuda:0"))
+        self.assertEqual((rocm.backend, rocm.device), ("rocm", "cuda:0"))
+
+    def test_xpu_and_cpu_have_native_device_names(self):
+        xpu = detect_accelerator(_FakeTorch(xpu=True))
+        cpu = detect_accelerator(_FakeTorch())
+        self.assertEqual((xpu.backend, xpu.device), ("xpu", "xpu:0"))
+        self.assertEqual((cpu.backend, cpu.device), ("cpu", "cpu"))
+
+    def test_each_runtime_executes_and_synchronizes_its_smoke_test(self):
+        cuda_torch = _FakeTorch(cuda="13.0")
+        rocm_torch = _FakeTorch(hip="7.2.1")
+        xpu_torch = _FakeTorch(xpu=True)
+        self.assertEqual(validate_accelerator("cuda", cuda_torch).backend, "cuda")
+        self.assertEqual(validate_accelerator("rocm", rocm_torch).backend, "rocm")
+        self.assertEqual(validate_accelerator("xpu", xpu_torch).backend, "xpu")
+        self.assertEqual(validate_accelerator("cpu", _FakeTorch()).backend, "cpu")
+        self.assertTrue(cuda_torch.cuda.synchronized)
+        self.assertTrue(rocm_torch.cuda.synchronized)
+        self.assertTrue(xpu_torch.xpu.synchronized)
+
+    def test_runtime_build_mismatch_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected rocm"):
+            validate_accelerator("rocm", _FakeTorch(cuda="13.0"))
 
 
 class ShortcutTests(unittest.TestCase):
@@ -410,6 +496,49 @@ class DesktopSourceTests(unittest.TestCase):
         }
         self.assertIn("generated_audio_directory", constants)
         self.assertIn("recorded_audio_directory", constants)
+
+    def test_model_loading_uses_backend_neutral_accelerator_and_sdpa(self):
+        source, tree = self._app_tree()
+        self.assertNotIn("get_best_device()", source)
+        frame = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "OmniVoiceFrame"
+        )
+        load_model = next(
+            node
+            for node in frame.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_LoadModelWorker"
+        )
+        function_source = ast.unparse(load_model)
+        self.assertIn("accelerator_info.device", function_source)
+        self.assertIn("'attn_implementation': 'sdpa'", function_source)
+        self.assertIn("'asr_device': device", function_source)
+
+    def test_installer_backend_matrix_is_complete_and_detached_from_pyproject(self):
+        root = Path(__file__).resolve().parents[1]
+        matrix = json.loads((root / "installer_backends.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(matrix["profiles"]), {"cuda", "rocm", "xpu", "cpu"})
+        metadata = (root / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertNotIn("[tool.uv.sources]", metadata)
+        self.assertNotIn("download.pytorch.org/whl/cu", metadata)
+        requirements = (root / "requirements-desktop.txt").read_text(encoding="utf-8")
+        dependency_lines = [
+            line.strip().lower()
+            for line in requirements.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        self.assertFalse(any(line.startswith("torch") for line in dependency_lines))
+        self.assertEqual(matrix["profiles"]["rocm"]["python_min"], "3.12")
+        self.assertEqual(
+            matrix["profiles"]["xpu"]["index_url"], "https://download.pytorch.org/whl/xpu"
+        )
+
+    def test_settings_exposes_copyable_accelerator_diagnostics(self):
+        source, _tree = self._app_tree()
+        self.assertIn("format_diagnostics(__version__, torch)", source)
+        self.assertIn("def OnCopyDiagnostics", source)
+        self.assertIn("wx.TheClipboard.SetData", source)
 
     def test_settings_cancel_checks_for_unsaved_changes(self):
         _source, tree = self._app_tree()

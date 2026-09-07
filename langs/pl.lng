@@ -269,5 +269,9 @@
     "select_folder_title": "Wybierz folder",
     "folder_path_empty": "Pole „{name}” nie może być puste.",
     "folder_path_is_file": "Pole „{name}” wskazuje plik zamiast folderu: {path}",
-    "invalid_settings_value": "Nieprawidłowa wartość ustawienia:\n{error}"
+    "invalid_settings_value": "Nieprawidłowa wartość ustawienia:\n{error}",
+    "acceleration_diagnostics": "Akceleracja i diagnostyka",
+    "copy_diagnostics": "Kopiuj diagnostykę",
+    "diagnostics_copied": "Skopiowano diagnostykę do schowka.",
+    "clipboard_failed": "Nie udało się otworzyć schowka. Spróbuj ponownie."
 }

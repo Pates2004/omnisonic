@@ -269,5 +269,9 @@
     "select_folder_title": "Select folder",
     "folder_path_empty": "The “{name}” field cannot be empty.",
     "folder_path_is_file": "The “{name}” field points to a file instead of a folder: {path}",
-    "invalid_settings_value": "Invalid setting value:\n{error}"
+    "invalid_settings_value": "Invalid setting value:\n{error}",
+    "acceleration_diagnostics": "Acceleration and diagnostics",
+    "copy_diagnostics": "Copy diagnostics",
+    "diagnostics_copied": "Diagnostics copied to the clipboard.",
+    "clipboard_failed": "The clipboard could not be opened. Try again."
 }
