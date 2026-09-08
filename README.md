@@ -58,6 +58,27 @@ build before the rest of the application, verifies dependencies and imports,
 and executes a real accelerator matrix multiplication. A damaged environment is
 repaired on the next launch.
 
+Portable mode uses the official [CPython NuGet package](https://www.nuget.org/packages/python/3.12.10),
+verified with SHA-256. It does not install Python globally or modify system PATH.
+Unlike the former embedded ZIP, it supports pip's isolated package builds,
+including ROCm's source package. The old `Cannot import 'setuptools.build_meta'`
+error was a launcher bootstrap bug, not a missing HIP SDK. Updating the launcher
+and retrying `start_desktop.bat -Mode Portable` repairs an incomplete installation;
+there is no need to delete the whole application or replace a working system-Python setup.
+
+Regular launches check hardware, declared package versions, and a real accelerator
+operation, but no longer import the entire application and run `pip check` before
+starting it a second time. Full validation runs during installation, with
+`-InstallOnly`, or once after installer inputs/hardware change. A stale marker alone
+does not trigger a new download: a working runtime is validated and reused.
+
+AMD ROCm is enabled as a supported profile, including the Radeon 8060S; support
+still depends on the GPU, Windows, and driver requirements in the backend matrix.
+The installer supplies the profile's ROCm SDK Python packages inside its private
+environment. Install a compatible AMD graphics driver as described in
+[AMD's Windows installation guide](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installryz/windows/install-pytorch.html).
+A separate system-wide HIP SDK does not fix Python package-build isolation errors.
+
 Runtime replacement is transactional. The launcher prepares and validates
 `env.new/` or `venv.new/` before activating it, and keeps the previously working
 runtime as `env.old/` or `venv.old/`. A failed staging install never replaces the
@@ -163,6 +184,11 @@ venv\Scripts\python -m unittest -v tests.test_desktop_logic
 
 Model-dependent LoRA tests require `OMNIVOICE_TEST_MODEL_PATH` to point to a
 local OmniVoice checkpoint.
+
+`powershell -File tests/test_launcher.ps1` tests startup decisions without a GPU.
+Add `-Portable` to download the official portable Python and build the small ROCm
+source package that previously failed. This network regression also tests Python
+after environment activation/renaming; it leaves its diagnostic files in `trash/`.
 
 ## Project structure
 

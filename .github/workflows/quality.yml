@@ -25,7 +25,7 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q omnisonic omnivoice tests wx_app.py
       - name: Test desktop logic
-        run: python -m unittest -v tests.test_desktop_logic
+        run: python -m unittest -v tests.test_desktop_logic tests.test_runtime_requirements
       - name: Parse and self-test the desktop launcher
         shell: powershell
         run: |
@@ -39,3 +39,6 @@ jobs:
       - name: Test the batch entry point
         shell: cmd
         run: start_desktop.bat -SelfTest
+      - name: Test startup logic and portable ROCm package installation
+        shell: powershell
+        run: .\tests\test_launcher.ps1 -Portable
