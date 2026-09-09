@@ -168,7 +168,7 @@ destination, without restarting the app. Unrelated settings leave a manually
 chosen batch directory unchanged. A running batch keeps its original destination;
 the updated folder applies to the next batch.
 
-Enable **Preserve input folder structure** to keep each selected folder's name
+**Preserve input folder structure** keeps each selected folder's name
 and its subfolders inside the batch output, for example:
 `Book/Chapter 1/part.txt` becomes `batch-.../Book/Chapter 1/part.wav`.
 With multiple selected folders, each gets its own output tree. Individually
@@ -178,7 +178,8 @@ selections overlap, a file is queued once using its first selection's origin.
 Only folders containing queued text files are recreated; empty folders and
 unrelated files are not copied. **Include subfolders** controls scanning, while
 this new checkbox controls output layout and can be changed after scanning.
-It is off by default, preserving the flat, numbered output layout.
+Both options are on by default. Disabling **Preserve input folder structure**
+restores the flat, numbered output layout without excluding subfolder inputs.
 
 Bad files are reported and remaining files continue. Cancellation waits for the
 current model call and keeps completed recordings. Retrying skips completed

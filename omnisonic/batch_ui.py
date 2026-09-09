@@ -37,7 +37,7 @@ class BatchTabMixin:
         layout.Add(self.batch_recursive, 0, wx.ALL, 5)
         self.batch_preserve_structure = wx.CheckBox(tab, label=self._("batch_preserve_structure"))
         self.batch_preserve_structure.SetName(self._("batch_preserve_structure"))
-        self.batch_preserve_structure.SetValue(False)
+        self.batch_preserve_structure.SetValue(True)
         layout.Add(self.batch_preserve_structure, 0, wx.ALL, 5)
         self.batch_list = wx.ListCtrl(tab, style=wx.LC_REPORT)
         self.batch_list.SetName(self._("batch_queue"))

@@ -51,6 +51,9 @@ def main():
         DEFAULT_CONFIG, generated_audio_directory=str(scratch / "audio"), show_progress=False
     )
     frame = TestFrame(cfg, None)
+    assert frame.batch_recursive.GetValue()
+    assert frame.batch_preserve_structure.GetValue()
+    frame.batch_preserve_structure.SetValue(False)
 
     def change_output_setting(directory):
         dialog = Mock(cfg=dict(frame.cfg, generated_audio_directory=str(directory)))
@@ -69,11 +72,11 @@ def main():
 
     try:
         first = scratch / "one.txt"
-        second = scratch / "folder" / "two.txt"
-        second.parent.mkdir()
+        second = scratch / "folder" / "nested" / "two.txt"
+        second.parent.mkdir(parents=True)
         first.write_text("First sentence.", encoding="utf-8")
         second.write_text("Second sentence.", encoding="utf-8")
-        frame._scan_batch_inputs([str(first), str(second.parent)])
+        frame._scan_batch_inputs([str(first), str(second.parent.parent)])
         wait_for_worker()
         assert frame.batch_list.GetItemCount() == 2
         frame._scan_batch_inputs([str(first)])
@@ -87,7 +90,8 @@ def main():
         change_output_setting(active_output)
         with patch.object(wx, "MessageBox", return_value=wx.OK):
             frame.OnShortcutGenerate(None)
-            assert generation_started.wait(10), "Batch did not start"
+            # Cold imports of the inference libraries can take longer than synthesis.
+            assert generation_started.wait(50), "Batch did not start"
             change_output_setting(next_output)
             release_generation.set()
             wait_for_worker()
@@ -98,6 +102,7 @@ def main():
         report = json.loads(reports[0].read_text())
         assert len(report["files"]) == 2
         assert all(Path(item["output"]).is_file() for item in report["files"])
+        assert all(Path(item["output"]).parent == reports[0].parent for item in report["files"])
         frame.batch_list.Select(0)
         frame.OnBatchRemove(None)
         assert len(frame.batch_items) == 1
@@ -138,7 +143,8 @@ def main():
         print("wx preserve-folder checkbox, nested/multiple folders and retained origins: OK")
     finally:
         release_generation.set()
-        wait_for_worker()
+        with patch.object(wx, "MessageBox", return_value=wx.OK):
+            wait_for_worker()
         frame.Destroy()
         app.Yield()
         app.Destroy()

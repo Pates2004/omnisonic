@@ -25,6 +25,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BatchSettingsTests(unittest.TestCase):
+    def test_both_folder_options_are_enabled_by_default(self):
+        tree = ast.parse((ROOT / "omnisonic/batch_ui.py").read_text(encoding="utf-8"))
+        setup = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "SetupBatchTab"
+        )
+        defaults = {
+            ast.unparse(node.func.value): ast.literal_eval(node.args[0])
+            for node in ast.walk(setup)
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "SetValue"
+        }
+        self.assertIs(defaults["self.batch_recursive"], True)
+        self.assertIs(defaults["self.batch_preserve_structure"], True)
+
     def test_settings_update_batch_folder_only_after_saving_a_changed_directory(self):
         # Exercise the actual settings handler without importing wx or a model in CI.
         tree = ast.parse((ROOT / "omnisonic/app.py").read_text(encoding="utf-8"))
