@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 def main():
@@ -32,11 +33,17 @@ def main():
         def ApplyConsoleState(self):
             pass
 
+    generation_started = threading.Event()
+    release_generation = threading.Event()
+
     class Model:
         sampling_rate = 24000
 
         def generate(self, **kwargs):
             assert kwargs["text"] in {"First sentence.", "Second sentence."}
+            generation_started.set()
+            if not release_generation.wait(30):
+                raise TimeoutError("Test did not release the batch model")
             return [np.zeros(2400, dtype=np.float32)]
 
     app = wx.App(False)
@@ -44,6 +51,13 @@ def main():
         DEFAULT_CONFIG, generated_audio_directory=str(scratch / "audio"), show_progress=False
     )
     frame = TestFrame(cfg, None)
+
+    def change_output_setting(directory):
+        dialog = Mock(cfg=dict(frame.cfg, generated_audio_directory=str(directory)))
+        dialog.ShowModal.return_value = wx.ID_OK
+        with patch.object(desktop, "SettingsDialog", return_value=dialog):
+            frame.OnOpenSettings(None)
+        assert frame.batch_output.GetValue() == str(directory)
 
     def wait_for_worker():
         deadline = time.monotonic() + 30
@@ -68,12 +82,19 @@ def main():
         frame.model = Model()
         frame.batch_mode.SetSelection(2)
         frame.notebook.SetSelection(frame.notebook.FindPage(frame.tab_batch))
+        active_output = scratch / "changed-before-start"
+        next_output = scratch / "changed-while-processing"
+        change_output_setting(active_output)
         with patch.object(wx, "MessageBox", return_value=wx.OK):
             frame.OnShortcutGenerate(None)
+            assert generation_started.wait(10), "Batch did not start"
+            change_output_setting(next_output)
+            release_generation.set()
             wait_for_worker()
         assert all(item.status == "done" for item in frame.batch_items)
-        reports = list((scratch / "audio").glob("*/batch_report.json"))
+        reports = list(active_output.glob("*/batch_report.json"))
         assert len(reports) == 1
+        assert not next_output.exists()
         report = json.loads(reports[0].read_text())
         assert len(report["files"]) == 2
         assert all(Path(item["output"]).is_file() for item in report["files"])
@@ -81,10 +102,17 @@ def main():
         frame.OnBatchRemove(None)
         assert len(frame.batch_items) == 1
         assert all(Path(item["output"]).is_file() for item in report["files"])
-        print(
-            "wx batch tab, deduplication, Ctrl+G, synthesis queue and non-destructive removal: OK"
-        )
+        frame._scan_batch_inputs([str(first)])
+        wait_for_worker()
+        with patch.object(wx, "MessageBox", return_value=wx.OK):
+            frame.OnShortcutGenerate(None)
+            wait_for_worker()
+        assert len(list(next_output.glob("*/*.wav"))) == 1
+        assert all(Path(item["output"]).is_file() for item in report["files"])
+        print("wx batch tab, live settings, fixed running output, Ctrl+G and safe removal: OK")
     finally:
+        release_generation.set()
+        wait_for_worker()
         frame.Destroy()
         app.Yield()
         app.Destroy()

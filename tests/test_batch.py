@@ -6,7 +6,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from omnisonic.batch import (
     BatchInputError,
@@ -19,6 +20,55 @@ from omnisonic.operations import OperationCancelled, OperationState
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class BatchSettingsTests(unittest.TestCase):
+    def test_settings_update_batch_folder_only_after_saving_a_changed_directory(self):
+        # Exercise the actual settings handler without importing wx or a model in CI.
+        tree = ast.parse((ROOT / "omnisonic/app.py").read_text(encoding="utf-8"))
+        frame_class = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "OmniVoiceFrame"
+        )
+        handler = next(
+            node
+            for node in frame_class.body
+            if isinstance(node, ast.FunctionDef) and node.name == "OnOpenSettings"
+        )
+        code = compile(ast.Module(body=[handler], type_ignores=[]), "settings-handler", "exec")
+        for changed, accepted, save_error in (
+            (True, True, None),
+            (False, True, None),
+            (True, False, None),
+            (True, True, OSError("Cannot save settings")),
+        ):
+            with self.subTest(changed=changed, accepted=accepted, save_error=save_error):
+                original = {"language": "en", "generated_audio_directory": "old"}
+                updated = dict(original, generated_audio_directory="new" if changed else "old")
+                frame = Mock(cfg=original, model=None)
+                dialog = Mock(cfg=updated)
+                dialog.ShowModal.return_value = 1 if accepted else 0
+                save = Mock(side_effect=save_error)
+                namespace = {
+                    "SettingsDialog": Mock(return_value=dialog),
+                    "SaveBasicConfig": save,
+                    "wx": SimpleNamespace(ID_OK=1, OK=2, ICON_ERROR=4, MessageBox=Mock()),
+                }
+                exec(code, namespace)
+                namespace["OnOpenSettings"](frame, None)
+                if accepted and save_error is None:
+                    self.assertIs(frame.cfg, updated)
+                    save.assert_called_once_with(updated)
+                    if changed:
+                        frame.batch_output.SetValue.assert_called_once_with("new")
+                    else:
+                        # Unrelated settings must not reset a manually chosen batch folder.
+                        frame.batch_output.SetValue.assert_not_called()
+                else:
+                    self.assertIs(frame.cfg, original)
+                    frame.batch_output.SetValue.assert_not_called()
+                dialog.Destroy.assert_called_once()
 
 
 class BatchTests(unittest.TestCase):

@@ -163,6 +163,10 @@ sequence, keeping GPU memory use bounded. Each input produces a separate WAV
 inside a new batch subfolder of the chosen output directory, along with
 `batch_report.json`. Matching names from different folders do not overwrite one
 another. This explicit batch destination bypasses the single-file save prompts.
+Saving a new generated-audio directory in Settings immediately updates the batch
+destination, without restarting the app. Unrelated settings leave a manually
+chosen batch directory unchanged. A running batch keeps its original destination;
+the updated folder applies to the next batch.
 
 Bad files are reported and remaining files continue. Cancellation waits for the
 current model call and keeps completed recordings. Retrying skips completed

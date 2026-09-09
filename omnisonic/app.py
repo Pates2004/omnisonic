@@ -1956,6 +1956,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             old_lang = self.cfg["language"]
             old_asr = self.cfg.get("asr_model_name")
             old_preload = self.cfg.get("preload_asr", False)
+            old_generated_directory = self.cfg["generated_audio_directory"]
             try:
                 SaveBasicConfig(dlg.cfg)
             except OSError as exc:
@@ -1967,6 +1968,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 dlg.Destroy()
                 return
             self.cfg = dlg.cfg
+            if old_generated_directory != self.cfg["generated_audio_directory"]:
+                # Running batches retain the output path captured by OnGenBatch.
+                self.batch_output.SetValue(self.cfg["generated_audio_directory"])
             self.ApplyConsoleState()
             self.ApplyShortcutSettings()
             self.ApplyTheme()
