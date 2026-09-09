@@ -109,7 +109,33 @@ def main():
             wait_for_worker()
         assert len(list(next_output.glob("*/*.wav"))) == 1
         assert all(Path(item["output"]).is_file() for item in report["files"])
+
+        # The checkbox may be enabled after scanning and survives progress updates.
+        frame.OnBatchClear(None)
+        book = scratch / "Book"
+        nested = book / "Chapter 1" / "part.txt"
+        nested.parent.mkdir(parents=True)
+        nested.write_text("First sentence.", encoding="utf-8")
+        other = scratch / "Notes" / "note.md"
+        other.parent.mkdir()
+        other.write_text("Second sentence.", encoding="utf-8")
+        frame._scan_batch_inputs([str(book), str(other.parent)])
+        wait_for_worker()
+        assert not frame.batch_preserve_structure.GetValue()
+        frame.batch_preserve_structure.SetValue(True)
+        with patch.object(wx, "MessageBox", return_value=wx.OK):
+            frame.OnShortcutGenerate(None)
+            assert not frame.batch_preserve_structure.IsEnabled()
+            wait_for_worker()
+        assert frame.batch_preserve_structure.IsEnabled()
+        assert all(item.status == "done" for item in frame.batch_items)
+        paths = [Path(item.output) for item in frame.batch_items]
+        assert paths[0].relative_to(paths[0].parents[2]) == Path("Book/Chapter 1/part.wav")
+        assert paths[1].relative_to(paths[1].parents[1]) == Path("Notes/note.wav")
+        assert frame.batch_items[0].source_root == str(book)
+        assert all(path.is_file() for path in paths)
         print("wx batch tab, live settings, fixed running output, Ctrl+G and safe removal: OK")
+        print("wx preserve-folder checkbox, nested/multiple folders and retained origins: OK")
     finally:
         release_generation.set()
         wait_for_worker()

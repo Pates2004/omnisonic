@@ -281,6 +281,7 @@
     "batch_remove": "Remove selected",
     "batch_clear": "Clear list",
     "batch_recursive": "Include subfolders",
+    "batch_preserve_structure": "Preserve input folder structure",
     "batch_queue": "Files to process",
     "batch_file": "Source file",
     "batch_status": "Status",

@@ -19,7 +19,7 @@ def main():
     import torch
 
     from omnisonic.accelerator import preferred_dtype, validate_accelerator
-    from omnisonic.batch import process_text_batch
+    from omnisonic.batch import BatchInput, process_text_batch
     from omnisonic.operations import OperationState
     from omnivoice import OmniVoice, VoiceClonePrompt
 
@@ -55,7 +55,7 @@ def main():
     for index, text in enumerate(("The first batch recording.", "The second batch recording.")):
         path = args.output / f"batch-input-{index}.txt"
         path.write_text(text, encoding="utf-8")
-        text_inputs.append(path)
+        text_inputs.append(BatchInput(path))
     results = process_text_batch(
         text_inputs,
         args.output / "batch",

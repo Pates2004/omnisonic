@@ -281,6 +281,7 @@
     "batch_remove": "Usuń zaznaczone",
     "batch_clear": "Wyczyść listę",
     "batch_recursive": "Uwzględniaj podfoldery",
+    "batch_preserve_structure": "Zachowaj strukturę folderów wejściowych",
     "batch_queue": "Pliki do przetworzenia",
     "batch_file": "Plik źródłowy",
     "batch_status": "Stan",

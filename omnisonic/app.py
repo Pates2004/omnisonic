@@ -1863,6 +1863,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             "batch_mode",
             "batch_output",
             "batch_recursive",
+            "batch_preserve_structure",
             "btn_save_preset",
             "btn_transcribe_ref",
             "list_presets",

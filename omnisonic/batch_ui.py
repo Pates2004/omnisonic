@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import wx
 
-from .batch import BatchInputError, BatchResult, discover_text_files, process_text_batch
+from .batch import BatchInput, BatchInputError, BatchResult, discover_text_files, process_text_batch
 from .config import PRESETS_DIR, default_audio_directory
 from .validation import safe_child_path
 
@@ -35,6 +35,10 @@ class BatchTabMixin:
         self.batch_recursive = wx.CheckBox(tab, label=self._("batch_recursive"))
         self.batch_recursive.SetValue(True)
         layout.Add(self.batch_recursive, 0, wx.ALL, 5)
+        self.batch_preserve_structure = wx.CheckBox(tab, label=self._("batch_preserve_structure"))
+        self.batch_preserve_structure.SetName(self._("batch_preserve_structure"))
+        self.batch_preserve_structure.SetValue(False)
+        layout.Add(self.batch_preserve_structure, 0, wx.ALL, 5)
         self.batch_list = wx.ListCtrl(tab, style=wx.LC_REPORT)
         self.batch_list.SetName(self._("batch_queue"))
         for index, (label, width) in enumerate(
@@ -108,10 +112,15 @@ class BatchTabMixin:
             raise ValueError(self._(str(exc))) from exc
 
     def _BatchScanned(self, result):
-        paths, errors = result
-        self.batch_items.extend(BatchResult(str(path)) for path in paths)
+        inputs, errors = result
+        self.batch_items.extend(
+            BatchResult(
+                str(item.path), source_root=str(item.root) if item.root is not None else None
+            )
+            for item in inputs
+        )
         self._refresh_batch_list()
-        self.Log(self._("batch_added").format(count=len(paths), total=len(self.batch_items)))
+        self.Log(self._("batch_added").format(count=len(inputs), total=len(self.batch_items)))
         if errors:
             self.Log("\n".join(f"{path}: {self._(error)}" for path, error in errors))
         self.batch_list.SetFocus()
@@ -223,11 +232,22 @@ class BatchTabMixin:
             output,
             kwargs,
             prompt_source,
-            tuple(Path(self.batch_items[index].source) for index in indices),
+            tuple(
+                BatchInput(
+                    Path(self.batch_items[index].source),
+                    Path(self.batch_items[index].source_root)
+                    if self.batch_items[index].source_root is not None
+                    else None,
+                )
+                for index in indices
+            ),
+            self.batch_preserve_structure.GetValue(),
             success_callback=lambda result: self._BatchFinished(result, output),
         )
 
-    def _GenBatchWorker(self, state, model, indices, output, kwargs, prompt_source, paths):
+    def _GenBatchWorker(
+        self, state, model, indices, output, kwargs, prompt_source, inputs, preserve_structure
+    ):
         import numpy as np
         import soundfile as sf
 
@@ -261,22 +281,23 @@ class BatchTabMixin:
             done = index if result.status == "running" else index + 1
             state.set_progress(
                 done,
-                len(paths),
+                len(inputs),
                 self._("batch_progress").format(
                     current=index + 1,
-                    total=len(paths),
+                    total=len(inputs),
                     file=Path(result.source).name,
                 ),
             )
             wx.CallAfter(self._BatchProgress, indices[index], result)
 
         return process_text_batch(
-            list(paths),
+            list(inputs),
             output,
             state,
             synthesize,
             save,
             progress,
+            preserve_structure=preserve_structure,
         )
 
     def _BatchProgress(self, index, result):
