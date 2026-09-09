@@ -63,6 +63,17 @@ RECORDED_AUDIO_FILE = TEMP_DIR / "recorded_reference.wav"
 
 def default_audio_directory(kind: str) -> Path:
     documents = Path.home() / "Documents"
+    if os.name == "nt":
+        # Documents can be redirected to OneDrive or another disk by Windows.
+        import ctypes
+
+        try:
+            buffer = ctypes.create_unicode_buffer(32768)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buffer) == 0:
+                if buffer.value:
+                    documents = Path(buffer.value)
+        except (AttributeError, OSError):
+            pass
     if os.name == "nt" or documents.exists():
         return documents / APP_NAME / kind
     return APP_DATA_DIR / "audio" / kind

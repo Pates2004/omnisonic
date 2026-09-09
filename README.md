@@ -144,6 +144,39 @@ After installation, the `omnisonic` command is also available.
 
 ## Dane prywatne / Private data
 
+### Power Switch: transfer to another PC or change the GPU
+
+Close OmniSonic, then run `power_switch.bat`. It needs only Windows PowerShell,
+not an installed Python environment. The menu offers:
+
+- **Change backend**: Auto, CUDA, ROCm, XPU, or CPU through the normal transactional
+  installer. Settings, presets and audio stay in place. Failed repair does not
+  replace the saved working Python/backend choice.
+- **Export**: settings (including shortcuts), the entire `presets/` folder, and
+  optionally saved audio from both configured audio directories.
+- **Import**: restore an exported folder. Existing extra presets remain; matching
+  files/settings are backed up before replacement.
+
+Copy the whole export folder from `power-switch-backups/` to the destination PC,
+then select Import there. Exports/backups contain private voice data and are
+ignored by Git. They are never automatically deleted. Import verifies SHA-256,
+rejects traversal paths and links/junctions, and rolls back failed file copies.
+
+Import remaps output folders to the destination user's actual Windows Documents
+location: `OmniSonic/generated` and `OmniSonic/record`. Python, drivers, cached
+models, temporary microphone references and old backend preferences are not
+transferred. Use **Change backend -> Auto** after import, then start normally.
+Model weights may need downloading on the destination PC.
+
+```bat
+power_switch.bat -Action Switch -Backend Auto
+power_switch.bat -Action Export -IncludeAudio
+power_switch.bat -Action Import -ProfilePath "D:\My OmniSonic profile"
+```
+
+See [the compatibility audit](docs/compatibility-audit.md) for the checked
+OmniVoice revision, GUI feature coverage and hardware-test limitations.
+
 Voice presets are stored in the portable `presets/` directory next to the
 application. This makes it possible to move or back up the program together
 with all saved voices. Settings and temporary recordings remain under the

@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions DisableDelayedExpansion
 title OmniSonic
 color 0b
 
@@ -12,14 +12,14 @@ if not exist "desktop_launcher.ps1" (
     exit /b 1
 )
 
-if "%~1"=="" (
-    set "OMNISONIC_LAUNCH_STYLE="
-    for /f "delims=" %%H in ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0desktop_launcher.ps1" -QueryHiddenLaunch') do set "OMNISONIC_LAUNCH_STYLE=%%H"
-    if /i "!OMNISONIC_LAUNCH_STYLE!"=="HIDE" (
-        start "" powershell.exe -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%~dp0desktop_launcher.ps1"
-        if not errorlevel 1 exit /b 0
-    )
-)
+if not "%~1"=="" goto visible_launch
+set "OMNISONIC_LAUNCH_STYLE="
+for /f "delims=" %%H in ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0desktop_launcher.ps1" -QueryHiddenLaunch') do set "OMNISONIC_LAUNCH_STYLE=%%H"
+if /i not "%OMNISONIC_LAUNCH_STYLE%"=="HIDE" goto visible_launch
+start "" powershell.exe -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%~dp0desktop_launcher.ps1"
+if not errorlevel 1 exit /b 0
+
+:visible_launch
 
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0desktop_launcher.ps1" %*
 set "LAUNCHER_EXIT=%ERRORLEVEL%"

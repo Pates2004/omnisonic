@@ -567,8 +567,14 @@ function Install-PythonBootstrapTransaction {
 function Invoke-AcceleratorProbe {
     param([string]$Python, [string]$ExpectedBackend)
     $probeScript = Join-Path $ProjectRoot "omnisonic\accelerator.py"
-    $output = @(& $Python -I -X utf8 $probeScript --validate $ExpectedBackend --requirements $RuntimeRequirementsPath --json 2>&1)
-    $exitCode = $LASTEXITCODE
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5.1 wraps native stderr warnings in ErrorRecords.
+        # A warning must not abort parsing the probe's JSON result and exit code.
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $Python -I -X utf8 $probeScript --validate $ExpectedBackend --requirements $RuntimeRequirementsPath --json 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousErrorAction }
     $textOutput = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
     $jsonLine = $output | ForEach-Object { $_.ToString() } |
         Where-Object { $_.Trim().StartsWith("{") } | Select-Object -Last 1
@@ -847,7 +853,6 @@ function Install-WithRecoveryChoice {
                 if ($answer -eq "2") {
                     $SelectedBackend = "cpu"
                     $RequestedBackend = "cpu"
-                    Save-BackendPreference "cpu"
                     break
                 }
                 if ($answer -eq "3") {
@@ -959,7 +964,7 @@ function Invoke-Main {
     $savedBackend = Get-SavedText $BackendFile
     $requestedBackend = Resolve-RequestedBackend $BackendWasExplicit $Backend `
         $env:OMNISONIC_BACKEND $savedBackend
-    if ($BackendWasExplicit) { Save-BackendPreference $requestedBackend }
+    $initialRequestedBackend = $requestedBackend
     $selectedBackend = if ($requestedBackend -eq "auto") {
         Get-HardwareBackend $inventory $matrix
     }
@@ -986,7 +991,6 @@ function Invoke-Main {
     $selectedMode = $modeSelection.Mode
     $systemPython = $modeSelection.SystemPython
     New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
-    $selectedMode | Set-Content -LiteralPath $ModeFile -Encoding ASCII
     $activeRoot = Get-EnvironmentRootForMode $selectedMode
     $python = Get-EnvironmentPython $selectedMode $activeRoot
     if ($BootstrapOnly) {
@@ -994,6 +998,8 @@ function Invoke-Main {
             $python = Install-PythonBootstrapTransaction $selectedMode $systemPython `
                 $profile $activeRoot
         }
+        $selectedMode | Set-Content -LiteralPath $ModeFile -Encoding ASCII
+        if ($BackendWasExplicit) { Save-BackendPreference $requestedBackend }
         Write-Host "Bootstrap test completed with $selectedMode Python: $python"
         return
     }
@@ -1008,6 +1014,10 @@ function Invoke-Main {
         $selectedBackend = $installed.Backend
         $profile = $installed.Profile
         $requestedBackend = $installed.RequestedBackend
+    }
+    $selectedMode | Set-Content -LiteralPath $ModeFile -Encoding ASCII
+    if ($BackendWasExplicit -or $requestedBackend -ne $initialRequestedBackend) {
+        Save-BackendPreference $requestedBackend
     }
     if ($InstallOnly) {
         Write-Host "Runtime installation and validation completed successfully: $python"

@@ -56,3 +56,4 @@ start.bat
 
 # Local quarantine for obsolete scripts and reproducible build/test artifacts.
 /trash/
+/power-switch-backups/

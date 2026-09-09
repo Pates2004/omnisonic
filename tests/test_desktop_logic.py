@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import string
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from omnisonic.accelerator import detect_accelerator, validate_accelerator
 from omnisonic.config import (
@@ -33,6 +35,18 @@ from omnisonic.validation import (
 
 
 class ConfigTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows known-folder API")
+    def test_redirected_documents_folder_is_used_for_audio(self):
+        def redirected(_window, _folder, _token, _flags, buffer):
+            buffer.value = r"C:\TestUser\OneDrive\Documents"
+            return 0
+
+        with patch("ctypes.windll.shell32.SHGetFolderPathW", side_effect=redirected):
+            self.assertEqual(
+                default_audio_directory("generated"),
+                Path(r"C:\TestUser\OneDrive\Documents\OmniSonic\generated"),
+            )
+
     def test_presets_are_portable_and_live_next_to_the_program(self):
         self.assertEqual(PRESETS_DIR, PROJECT_ROOT / "presets")
 
@@ -276,6 +290,12 @@ class AcceleratorTests(unittest.TestCase):
     def test_runtime_build_mismatch_is_rejected(self):
         with self.assertRaisesRegex(RuntimeError, "Expected rocm"):
             validate_accelerator("rocm", _FakeTorch(cuda="13.0"))
+
+    def test_xpu_build_without_intel_gpu_is_not_a_cpu_build(self):
+        runtime = _FakeTorch()
+        runtime.__version__ = "2.11.0+xpu"
+        with self.assertRaisesRegex(RuntimeError, "not CPU-only"):
+            validate_accelerator("cpu", runtime)
 
 
 class ShortcutTests(unittest.TestCase):
@@ -558,6 +578,24 @@ class DesktopSourceTests(unittest.TestCase):
         self.assertIn("format_diagnostics(__version__, torch)", source)
         self.assertIn("def OnCopyDiagnostics", source)
         self.assertIn("wx.TheClipboard.SetData", source)
+
+    def test_gui_exposes_every_engine_generation_config_field(self):
+        root = Path(__file__).resolve().parents[1]
+        engine = ast.parse((root / "omnivoice/models/omnivoice.py").read_text(encoding="utf-8"))
+        config_class = next(
+            node
+            for node in engine.body
+            if isinstance(node, ast.ClassDef) and node.name == "OmniVoiceGenerationConfig"
+        )
+        fields = {node.target.id for node in config_class.body if isinstance(node, ast.AnnAssign)}
+        _, app = self._app_tree()
+        method = next(
+            node
+            for node in ast.walk(app)
+            if isinstance(node, ast.FunctionDef) and node.name == "GetGenConfig"
+        )
+        constructor = next(node for node in ast.walk(method) if isinstance(node, ast.Return)).value
+        self.assertEqual(fields, {keyword.arg for keyword in constructor.keywords})
 
     def test_settings_cancel_checks_for_unsaved_changes(self):
         _source, tree = self._app_tree()

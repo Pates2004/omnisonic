@@ -42,3 +42,8 @@ jobs:
       - name: Test startup logic and portable ROCm package installation
         shell: powershell
         run: .\tests\test_launcher.ps1 -Portable
+      - name: Test Power Switch transfers and batch path quoting
+        shell: powershell
+        run: |
+          .\tests\test_power_switch.ps1
+          .\tests\test_batch_paths.ps1
