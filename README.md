@@ -144,6 +144,32 @@ After installation, the `omnisonic` command is also available.
 
 ## Dane prywatne / Private data
 
+### Batch text-to-speech
+
+On **Batch processing**, use **Add files** or **Add folders** to select one or
+many TXT/Markdown inputs. Folder selection supports multiple folders at once;
+subfolder scanning is optional. Duplicate paths are skipped. UTF-8 (with or
+without BOM) and UTF-16 with BOM are supported; Markdown is read as plain text.
+Binary documents such as PDF/DOCX and audio inputs are not treated as text.
+
+Choose Clone, Design, or Automatic mode. The batch uses the voice/preset,
+language/instructions and advanced settings from the corresponding main tab.
+With Clone mode, the same reference prompt is prepared once and reused for the
+whole batch. In Automatic/Design mode the engine can choose a different voice
+for each file; use a cloned preset when speaker consistency is required.
+
+**Process files** (or **Ctrl+G** while this tab is active) processes files in
+sequence, keeping GPU memory use bounded. Each input produces a separate WAV
+inside a new batch subfolder of the chosen output directory, along with
+`batch_report.json`. Matching names from different folders do not overwrite one
+another. This explicit batch destination bypasses the single-file save prompts.
+
+Bad files are reported and remaining files continue. Cancellation waits for the
+current model call and keeps completed recordings. Retrying skips completed
+queue entries; Delete/**Remove selected** only remove entries from the queue,
+not source files or saved audio. The queue is session-only. Limits are 5000
+files per queue and 5 MiB of text per file.
+
 ### Power Switch: transfer to another PC or change the GPU
 
 Close OmniSonic, then run `power_switch.bat`. It needs only Windows PowerShell,

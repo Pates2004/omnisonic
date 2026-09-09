@@ -21,6 +21,16 @@ class OperationState:
     finished_event: threading.Event = field(default_factory=threading.Event)
     result: Any = None
     error: Exception | None = None
+    _progress: tuple[int, int, str] = (0, 0, "")
+    _progress_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def set_progress(self, done: int, total: int, message: str = "") -> None:
+        with self._progress_lock:
+            self._progress = (max(0, min(done, total)), max(0, total), message)
+
+    def get_progress(self) -> tuple[int, int, str]:
+        with self._progress_lock:
+            return self._progress
 
     @property
     def cancel_flag(self) -> bool:

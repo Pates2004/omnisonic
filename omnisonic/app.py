@@ -27,6 +27,7 @@ from .config import (
     migrate_legacy_user_data,
     save_config,
 )
+from .batch_ui import BatchTabMixin
 from .i18n import load_locales, translate
 from .operations import OperationState, execute_worker
 from .shortcuts import (
@@ -403,7 +404,12 @@ class OperationDialog:
             threading.Thread(target=self._run_worker, daemon=True).start()
             while not self.state.finished:
                 value = self.dialog.GetValue()
-                cont, _ = self.dialog.Update(value + 1 if value < 100 else 0)
+                done, total, message = self.state.get_progress()
+                value = int(done * 100 / total) if total else (value + 1 if value < 100 else 0)
+                message = (
+                    self._("cancel_pending") if self.state.cancel_flag else (message or self.msg)
+                )
+                cont, _ = self.dialog.Update(value, message)
                 if not cont and not self.state.cancel_flag:
                     self._confirm_cancel()
                     if not self.state.cancel_flag:
@@ -429,15 +435,21 @@ class OperationDialog:
             self.dialog.Centre()
 
             timer = wx.Timer(self.dialog)
-            self.dialog.Bind(
-                wx.EVT_TIMER,
-                lambda event: (
+
+            def update_progress(event):
+                done, total, message = self.state.get_progress()
+                if total:
+                    gauge.SetValue(int(done * 100 / total))
+                    if message and not self.state.cancel_flag:
+                        self.label.SetLabel(message)
+                        self.label.Wrap(390)
+                        panel.Layout()
+                elif self.cfg.get("fake_progress_numbers", False):
                     gauge.SetValue((gauge.GetValue() + 5) % 101)
-                    if self.cfg.get("fake_progress_numbers", False)
-                    else gauge.Pulse()
-                ),
-                timer,
-            )
+                else:
+                    gauge.Pulse()
+
+            self.dialog.Bind(wx.EVT_TIMER, update_progress, timer)
             timer.Start(100)
             threading.Thread(target=self._run_worker, daemon=True).start()
             self.dialog.ShowModal()
@@ -1538,7 +1550,7 @@ class SettingsDialog(wx.Dialog):
             event.Veto()
 
 
-class OmniVoiceFrame(wx.Frame):
+class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     def __init__(self, cfg, *args, **kw):
         super(OmniVoiceFrame, self).__init__(*args, **kw)
 
@@ -1709,11 +1721,13 @@ class OmniVoiceFrame(wx.Frame):
         self.tab_adv = scrolled.ScrolledPanel(self.notebook)
 
         self.tab_auto = wx.Panel(self.notebook)
+        self.tab_batch = wx.Panel(self.notebook)
 
         self.notebook.AddPage(self.tab_clone, self._("tab_clone"))
         self.notebook.AddPage(self.tab_presets, self._("tab_presets"))
         self.notebook.AddPage(self.tab_design, self._("tab_design"))
         self.notebook.AddPage(self.tab_auto, self._("tab_auto"))
+        self.notebook.AddPage(self.tab_batch, self._("batch_title"))
         self.notebook.AddPage(self.tab_adv, self._("tab_adv"))
 
         self.SetupCloneTab(self.tab_clone)
@@ -1721,6 +1735,7 @@ class OmniVoiceFrame(wx.Frame):
         self.SetupDesignTab(self.tab_design)
         self.SetupAutoTab(self.tab_auto)
         self.SetupAdvTab(self.tab_adv)
+        self.SetupBatchTab(self.tab_batch)
 
         self.main_vbox.Add(self.notebook, 1, wx.EXPAND | wx.ALL, 5)
 
@@ -1765,6 +1780,10 @@ class OmniVoiceFrame(wx.Frame):
         self.RefreshPresets()
 
     def OnProgTimer(self, event):
+        done, total, _message = self.current_op.get_progress() if self.current_op else (0, 0, "")
+        if total:
+            self.gauge.SetValue(int(done * 100 / total))
+            return
         if self.cfg.get("fake_progress_numbers", False):
             self.gauge.SetValue((self.gauge.GetValue() + 2) % 101)
         else:
@@ -1780,6 +1799,7 @@ class OmniVoiceFrame(wx.Frame):
             (self.tab_clone, self.btn_gen_clone, self.OnGenClone),
             (self.tab_design, self.btn_gen_design, self.OnGenDesign),
             (self.tab_auto, self.btn_gen_auto, self.OnGenAuto),
+            (self.tab_batch, self.btn_gen_batch, self.OnGenBatch),
         )
         for target_page, button, handler in actions:
             if page is target_page:
@@ -1833,6 +1853,16 @@ class OmniVoiceFrame(wx.Frame):
             "btn_gen_clone",
             "btn_gen_design",
             "btn_gen_auto",
+            "btn_gen_batch",
+            "btn_batch_files",
+            "btn_batch_folders",
+            "btn_batch_remove",
+            "btn_batch_clear",
+            "btn_batch_browse",
+            "batch_list",
+            "batch_mode",
+            "batch_output",
+            "batch_recursive",
             "btn_save_preset",
             "btn_transcribe_ref",
             "list_presets",

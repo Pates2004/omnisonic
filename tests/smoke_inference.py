@@ -19,6 +19,8 @@ def main():
     import torch
 
     from omnisonic.accelerator import preferred_dtype, validate_accelerator
+    from omnisonic.batch import process_text_batch
+    from omnisonic.operations import OperationState
     from omnivoice import OmniVoice, VoiceClonePrompt
 
     accelerator = validate_accelerator(args.backend)
@@ -49,7 +51,22 @@ def main():
     )[0]
     assert cloned.size > 0 and np.isfinite(cloned).all()
     sf.write(args.output / "cloned.wav", cloned, model.sampling_rate)
+    text_inputs = []
+    for index, text in enumerate(("The first batch recording.", "The second batch recording.")):
+        path = args.output / f"batch-input-{index}.txt"
+        path.write_text(text, encoding="utf-8")
+        text_inputs.append(path)
+    results = process_text_batch(
+        text_inputs,
+        args.output / "batch",
+        OperationState(),
+        lambda text: model.generate(text=text, language="en", voice_clone_prompt=restored)[0],
+        lambda path, audio: sf.write(path, audio, model.sampling_rate),
+    )
+    assert all(item.status == "done" for item in results)
+    assert all(sf.info(item.output).frames > 0 for item in results)
     print(f"Real {accelerator.backend} inference, portable preset save/load and cloning: OK")
+    print("Real two-file batch synthesis: OK")
 
 
 if __name__ == "__main__":
