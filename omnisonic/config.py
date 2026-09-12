@@ -106,6 +106,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "asr_model_name": "openai/whisper-large-v3-turbo",
     "preload_asr": False,
     "auto_transcribe_reference": True,
+    "unload_asr_after_transcription": False,
+    "unload_omnivoice_after_operation": False,
     "normalize_text": False,
     "use_duration": False,
     "duration_val": 5.0,

@@ -166,7 +166,7 @@ class BatchTabMixin:
                 self.batch_output.SetValue(dialog.GetPath())
 
     def OnGenBatch(self, event):
-        if not self.model:
+        if not self._CanUseModel():
             wx.MessageBox(self._("msg_load_first"), self._("error_title"), parent=self)
             return
         indices = [index for index, item in enumerate(self.batch_items) if item.status != "done"]
@@ -223,11 +223,10 @@ class BatchTabMixin:
             "batch-" + datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid4().hex[:8]
         )
         self.OnStopAudio(None)
-        self.RunOperation(
+        self.RunModelOperation(
             "batch_title",
             "batch_working",
             self._GenBatchWorker,
-            self.model,
             tuple(indices),
             output,
             kwargs,
@@ -254,6 +253,8 @@ class BatchTabMixin:
         from omnivoice import VoiceClonePrompt
 
         state.check_cancelled()
+        # Keep temporary GPU prompt tokens out of the GUI's retained worker args.
+        kwargs = dict(kwargs)
         if prompt_source:
             preset, reference, text = prompt_source
             kwargs["voice_clone_prompt"] = (

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -71,6 +72,13 @@ def execute_worker(state: OperationState, worker: Callable[..., Any], *args: Any
     except Exception as exc:
         state.error = exc
         logger.exception("%s failed", state.name)
+        # Keep the error message, not model/tensor references in worker frames.
+        seen = set()
+        error = exc
+        while error is not None and id(error) not in seen:
+            seen.add(id(error))
+            traceback.clear_frames(error.__traceback__)
+            error = error.__cause__ or error.__context__
     finally:
         state.finished_event.set()
     return state

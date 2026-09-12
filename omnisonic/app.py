@@ -11,7 +11,6 @@ import wx.lib.scrolledpanel as scrolled
 from . import __version__
 from .accelerator import (
     detect_accelerator,
-    empty_accelerator_cache,
     format_diagnostics,
     preferred_dtype,
 )
@@ -30,6 +29,7 @@ from .config import (
 from .batch_ui import BatchTabMixin
 from .i18n import load_locales, translate
 from .operations import OperationState, execute_worker
+from .model_lifecycle import ModelLifecycle
 from .shortcuts import (
     SHORTCUT_DEFINITIONS,
     default_shortcut_bindings,
@@ -797,6 +797,24 @@ class SettingsDialog(wx.Dialog):
             self.chk_auto_transcribe.SetValue(self.cfg.get("auto_transcribe_reference", True))
             vbox_sys.Add(self.chk_auto_transcribe, 0, wx.ALL | wx.EXPAND, 5)
 
+            self.chk_unload_asr = wx.CheckBox(
+                tab_sys, label=self._("unload_asr_after_transcription")
+            )
+            self.chk_unload_asr.SetName(self._("unload_asr_after_transcription"))
+            self.chk_unload_asr.SetValue(self.cfg.get("unload_asr_after_transcription", False))
+            vbox_sys.Add(self.chk_unload_asr, 0, wx.ALL | wx.EXPAND, 5)
+            self.chk_unload_omnivoice = wx.CheckBox(
+                tab_sys, label=self._("unload_omnivoice_after_operation")
+            )
+            self.chk_unload_omnivoice.SetName(self._("unload_omnivoice_after_operation"))
+            self.chk_unload_omnivoice.SetValue(
+                self.cfg.get("unload_omnivoice_after_operation", False)
+            )
+            vbox_sys.Add(self.chk_unload_omnivoice, 0, wx.ALL | wx.EXPAND, 5)
+            memory_hint = wx.StaticText(tab_sys, label=self._("model_memory_hint"))
+            memory_hint.Wrap(640)
+            vbox_sys.Add(memory_hint, 0, wx.ALL | wx.EXPAND, 5)
+
             self.chk_clean_temp = wx.CheckBox(tab_sys, label=self._("clean_temp_lbl"))
             self.chk_clean_temp.SetName(self._("clean_temp_lbl"))
             self.chk_clean_temp.SetValue(self.cfg.get("clean_temp", True))
@@ -1075,6 +1093,8 @@ class SettingsDialog(wx.Dialog):
                 "asr_model": self.cb_asr.GetValue(),
                 "preload_asr": self.chk_preload_asr.GetValue(),
                 "auto_transcribe_reference": self.chk_auto_transcribe.GetValue(),
+                "unload_asr_after_transcription": self.chk_unload_asr.GetValue(),
+                "unload_omnivoice_after_operation": self.chk_unload_omnivoice.GetValue(),
                 "clean_temp": self.chk_clean_temp.GetValue(),
                 "force_splash": self.chk_force_splash.GetValue(),
                 "show_progress": self.chk_show_progress.GetValue(),
@@ -1333,6 +1353,8 @@ class SettingsDialog(wx.Dialog):
             self.cb_asr.SetValue(defaults["asr_model_name"])
             self.chk_preload_asr.SetValue(defaults["preload_asr"])
             self.chk_auto_transcribe.SetValue(defaults["auto_transcribe_reference"])
+            self.chk_unload_asr.SetValue(defaults["unload_asr_after_transcription"])
+            self.chk_unload_omnivoice.SetValue(defaults["unload_omnivoice_after_operation"])
             self.chk_force_splash.SetValue(defaults["force_splash"])
             self.chk_show_progress.SetValue(defaults["show_progress"])
             self.chk_fake_progress.SetValue(defaults["fake_progress_numbers"])
@@ -1505,6 +1527,8 @@ class SettingsDialog(wx.Dialog):
             self.cfg["clean_temp"] = self.chk_clean_temp.GetValue()
             self.cfg["preload_asr"] = self.chk_preload_asr.GetValue()
             self.cfg["auto_transcribe_reference"] = self.chk_auto_transcribe.GetValue()
+            self.cfg["unload_asr_after_transcription"] = self.chk_unload_asr.GetValue()
+            self.cfg["unload_omnivoice_after_operation"] = self.chk_unload_omnivoice.GetValue()
             self.cfg["auto_save_gen"] = self.chk_auto_gen.GetValue()
             self.cfg["auto_save_gen_folder"] = self.chk_auto_gen_folder.GetValue()
             self.cfg["generated_audio_directory"] = generated_directory
@@ -1565,6 +1589,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         super(OmniVoiceFrame, self).__init__(*args, **kw)
 
         self.cfg = cfg
+        self._models = ModelLifecycle(
+            self._LoadModelWorker, self._CollectModelMemory, self._CreateTranscriber
+        )
         self.model = None
         self.audio_data = None
         self.sample_rate = 24000
@@ -1589,6 +1616,43 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
     def _(self, key):
         return translate(LOCALE, self.cfg.get("language", "en"), key)
+
+    @property
+    def model(self):
+        return self._models.model
+
+    @model.setter
+    def model(self, value):
+        self._models.model = value
+
+    def _CanUseModel(self):
+        return self.model is not None or self.cfg.get("unload_omnivoice_after_operation", False)
+
+    def _CollectModelMemory(self):
+        if torch and accelerator_info:
+            from omnivoice.utils.memory import release_memory
+
+            release_memory(accelerator_info.device, torch)
+
+    def _CreateTranscriber(self, settings):
+        from omnivoice.models.omnivoice import WhisperASR
+
+        return WhisperASR(settings["asr_model_name"], accelerator_info.device)
+
+    def RunModelOperation(
+        self, title_key, msg_key, worker, *args, success_callback=None, transcription=False
+    ):
+        # Do not put model references in a modal dialog, closure or worker args:
+        # they would keep VRAM alive after the lifecycle owner released it.
+        return self.RunOperation(
+            title_key,
+            msg_key,
+            self._models.run_transcription if transcription else self._models.run,
+            dict(self.cfg),
+            worker,
+            *args,
+            success_callback=success_callback,
+        )
 
     def ApplyConsoleState(self):
         SetConsoleVisible(not self.cfg.get("hide_console", True))
@@ -1904,6 +1968,12 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             self.item_save_preset.Enable(enabled)
 
     def _complete_operation(self, state, success_callback):
+        was_released = self._models.needs_collection and self.model is None
+        self._models.collect_if_needed()
+        self.btn_toggle_model.SetLabel(self._("unload_model" if self.model else "load_model"))
+        self.sample_rate = self._models.sampling_rate
+        if was_released:
+            self.Log(self._("model_unloaded"), success=True)
         if state.error is not None:
             message = self._("msg_error") + str(state.error)
             self.Log(message)
@@ -1997,9 +2067,11 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             self.ApplyFontSize()
             if old_lang != self.cfg["language"]:
                 wx.MessageBox(self._("restart_lang"), self._("info_title"))
-            if self.model and old_asr != self.cfg.get("asr_model_name"):
-                self.model._asr_model_name = self.cfg["asr_model_name"]
-                self.model._asr_pipe = None
+            if old_asr != self.cfg.get("asr_model_name") and not (
+                self.current_op and not self.current_op.finished
+            ):
+                self._models.configure_asr(self.cfg)
+                self._models.collect_if_needed()
             if self.model and old_preload != self.cfg.get("preload_asr", False):
                 wx.MessageBox(self._("model_reload_required"), self._("info_title"))
         dlg.Destroy()
@@ -2456,7 +2528,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if self.clone_ref_text.GetValue().strip():
             self._auto_reference_pending = False
             return
-        if not self.model or (self.current_op and not self.current_op.finished):
+        if not self._CanUseModel() or (self.current_op and not self.current_op.finished):
             return  # Retried once the model/current operation has finished.
         if getattr(self, "rec_stream", None) is not None:
             self._reference_timer = wx.CallLater(600, self._MaybeAutoTranscribeReference)
@@ -2473,7 +2545,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     def OnTranscribeReference(self, event, automatic=False):
         if self.current_op and not self.current_op.finished:
             return
-        if not self.model:
+        if not self._CanUseModel():
             wx.MessageBox(self._("msg_load_first"), self._("error_title"))
             return
         path = self.clone_ref_audio.GetValue().strip()
@@ -2500,13 +2572,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             if not automatic:
                 self.clone_ref_text.SetFocus()
 
-        self.RunOperation(
+        self.RunModelOperation(
             "op_transcribe_title",
             "op_transcribe_msg",
             self._TranscribeReferenceWorker,
-            self.model,
             path,
             success_callback=on_success,
+            transcription=True,
         )
 
     def _TranscribeReferenceWorker(self, state, model, path):
@@ -2583,29 +2655,26 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             self.OnToggleModel(None)
 
     def OnToggleModel(self, event):
+        if self.current_op and not self.current_op.finished:
+            return
         if self.model is None:
 
-            def on_success(model):
-                self.model = model
-                self.sample_rate = int(getattr(model, "sampling_rate", 24000) or 24000)
+            def on_success(_result):
                 self.btn_toggle_model.SetLabel(self._("unload_model"))
                 self.Log(self._("model_loaded"), success=True)
                 self.clone_text.SetFocus()
                 wx.Bell()
 
             self.RunOperation(
-                "op_load_title", "op_load_msg", self._LoadModelWorker, success_callback=on_success
+                "op_load_title", "op_load_msg", self._EnsureModelWorker, success_callback=on_success
             )
         else:
 
             def on_success(_result):
-                self.model = None
-                if torch and accelerator_info:
-                    empty_accelerator_cache(accelerator_info, torch)
                 self.btn_toggle_model.SetLabel(self._("load_model"))
-                self.Log(self._("model_unloaded"), success=True)
                 wx.Bell()
 
+            self._auto_reference_pending = False
             self.RunOperation(
                 "op_unload_title",
                 "op_unload_msg",
@@ -2620,7 +2689,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         kwargs = {
             "device_map": device,
             "dtype": dtype,
-            "load_asr": self.cfg.get("preload_asr", False),
+            "load_asr": self.cfg.get("preload_asr", False) and self._models.asr_pipe is None,
             "asr_device": device,
             "attn_implementation": "sdpa",
         }
@@ -2628,11 +2697,19 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if asr_name:
             kwargs["asr_model_name"] = asr_name
         model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", **kwargs)
-        state.check_cancelled()
         return model
+
+    def _EnsureModelWorker(self, state):
+        try:
+            self._models.ensure(state, self.cfg)
+        except Exception:
+            self._models.release_all()
+            raise
+        # Do not retain the model in OperationState.result.
 
     def _UnloadModelWorker(self, state):
         state.check_cancelled()
+        self._models.release_all()
         return True
 
     def GetGenConfig(self):
@@ -2683,7 +2760,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 )
 
     def OnGenClone(self, event):
-        if not self.model:
+        if not self._CanUseModel():
             wx.MessageBox(self._("msg_load_first"), self._("error_title"))
             return
 
@@ -2726,11 +2803,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             return
 
         self._prepare_generation()
-        self.RunOperation(
+        self.RunModelOperation(
             "op_gen_title",
             "op_gen_msg",
             self._GenCloneWorker,
-            self.model,
             gen_config,
             text,
             ref_audio,
@@ -2815,7 +2891,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         tab.SetSizer(vbox)
 
     def OnGenAuto(self, event):
-        if not self.model:
+        if not self._CanUseModel():
             wx.MessageBox(self._("msg_load_first"), self._("error_title"))
             return
         text = self.auto_text.GetValue().strip()
@@ -2831,11 +2907,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             return
 
         self._prepare_generation()
-        self.RunOperation(
+        self.RunModelOperation(
             "op_auto_title",
             "op_auto_msg",
             self._GenAutoWorker,
-            self.model,
             gen_config,
             text,
             lang,
@@ -2859,7 +2934,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         return audio[0]
 
     def OnGenDesign(self, event):
-        if not self.model:
+        if not self._CanUseModel():
             wx.MessageBox(self._("msg_load_first"), self._("error_title"))
             return
         text = self.design_text.GetValue().strip()
@@ -2889,11 +2964,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         instruct = ", ".join(instructs) if instructs else None
 
         self._prepare_generation()
-        self.RunOperation(
+        self.RunModelOperation(
             "op_gen_title",
             "op_gen_msg",
             self._GenDesignWorker,
-            self.model,
             gen_config,
             text,
             lang,
@@ -2935,7 +3009,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self._PromptAndSavePreset(ref_audio, ref_text)
 
     def _PromptAndSavePreset(self, ref_audio, ref_text):
-        if not self.model:
+        if not self._CanUseModel():
             wx.MessageBox(self._("msg_load_first"), self._("error_title"))
             return
 
@@ -2987,11 +3061,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             wx.MessageBox(msg, self._("success_title"), wx.OK | wx.ICON_INFORMATION)
 
     def _StartPresetRebuild(self, ref_audio, ref_text, path, original_path=None):
-        self.RunOperation(
+        self.RunModelOperation(
             "op_preset_title",
             "op_preset_msg",
             self._SavePresetWorker,
-            self.model,
             ref_audio,
             ref_text,
             path,
@@ -3081,7 +3154,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             return
 
         if source_audio:
-            if not self.model:
+            if not self._CanUseModel():
                 wx.MessageBox(self._("msg_load_first"), self._("error_title"))
                 return
             if not os.path.isfile(source_audio):

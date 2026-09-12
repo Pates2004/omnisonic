@@ -240,11 +240,30 @@ manually. Disabling it only disables proactive transcription on file selection;
 the engine still needs a transcript when creating a voice prompt and obtains one
 if you generate/save a preset with an empty reference-text field.
 **Preload ASR** is a separate option and is disabled by default. When disabled,
-Whisper loads on first use, not together with the synthesis model. Once loaded,
-it stays in memory for subsequent transcriptions; it is not automatically
-offloaded to CPU or unloaded after each file. Unloading the OmniVoice model or
-closing the application releases it. Changing the preload setting takes effect
-after reloading the model; it does not unload an already loaded Whisper.
+Whisper loads on first use, not together with the synthesis model. Changing this
+setting takes effect after reloading the model; it does not by itself unload an
+already loaded Whisper.
+
+Settings / System also has two independent, **default-off** memory options:
+
+- **Release the Whisper model from memory after transcription** unloads Whisper
+  immediately after recognition, including recognition during cloning/preset
+  creation. The next transcription reloads it on the selected accelerator.
+- **Release the OmniVoice model from memory after each operation** unloads the
+  synthesis model after generation, preset creation or another operation using
+  it. A batch keeps the model for the entire queue and releases it when the queue
+  finishes or is cancelled. The next operation loads it automatically.
+
+These options drop model weights from RAM/VRAM, rather than move them to CPU.
+Downloaded files stay on disk and generated audio remains playable/saveable.
+Errors and cancellation also trigger cleanup. Changes apply to the next
+operation, without restarting. Reloading models adds latency. If only OmniVoice
+release is enabled, Whisper can remain cached independently; transcribing while
+OmniVoice is unloaded loads only Whisper. Manual model unloading releases both.
+With both options off, the existing keep-models-loaded behavior is unchanged.
+GPU runtime/BLAS workspaces can still occupy a small amount of memory after all
+model weights are released; zero VRAM usage is not expected while the app runs.
+
 Whisper handles audio longer than 30 seconds using timestamp-enabled long-form
 generation, but only plain text is inserted into the reference field. It uses
 the same PyTorch accelerator as synthesis, including AMD ROCm; whisper.cpp is

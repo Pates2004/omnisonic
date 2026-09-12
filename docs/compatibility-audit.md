@@ -96,8 +96,49 @@ runs nevertheless completed successfully. Experimental kernels were not forced o
 This is a single-device regression check, not a long training/stability benchmark.
 CUDA and Intel hardware were not available for a new physical-device retest here.
 
-Whisper lifetime was also checked in the desktop code: `preload_asr=false` is the
-default and delays loading until first use. It does **not** enable automatic
-offloading; the pipeline remains cached until the model is unloaded/replaced or
-the application closes. Automatic reference transcription is a separate,
-default-enabled setting.
+At the start of this audit, Whisper remained cached after its first use.
+`preload_asr=false` only controlled initial loading. Optional release policies
+were subsequently added as described below; automatic reference transcription
+remains a separate, default-enabled setting.
+
+## Optional model release — 2026-09-12
+
+Added independent, default-off Whisper and OmniVoice release checkboxes, with
+normalization, persistence, unsaved-change detection, reset and PL/EN labels.
+Model operations acquire a model lazily and release it after the whole operation
+(whole queue for batches), with no model references retained in dialog arguments
+or operation results. Exception frame cleanup prevents failed workers retaining
+weights. Standalone ASR avoids loading synthesis weights just to transcribe.
+
+Real Radeon 8060S tests (`tests/smoke_model_memory.py`) passed for repeated
+transcription and synthesis/reload, internal ASR during preset creation, retaining
+Whisper independently, switching the release policy, errors and cancellation.
+Weak references confirmed model parameters and buffers were destroyed, and
+repeated cycles returned to the same allocator usage (113,246,208 bytes, 108 MiB).
+Whisper loading used about 1.65–1.73 GB and OmniVoice about 2.14 GB in that process;
+these are measurements for this runtime, not universal memory requirements.
+
+The first preset-memory test found a genuine upstream retention bug:
+Transformers' Higgs audio tokenizer uses an instance-keyed `lru_cache` for
+`_get_conv1d_layers`, keeping tokenizer weights alive after the owning OmniVoice
+object is dropped. Model release now clears that lookup cache. Prompt creation
+also runs without autograd. The corrected test returned to 108 MiB after preset
+creation instead of retaining roughly 919 MB. The remaining allocations were
+non-Python runtime workspaces, not model tensors; tests verify both object
+destruction and stable repeated allocations rather than require zero GPU usage.
+
+`tests/test_model_lifecycle.py` covers all four policy combinations, lazy reuse,
+standalone ASR, errors/cancel/retry, sample rate preservation, tokenizer-cache
+retention and CPU/CUDA/ROCm/XPU cleanup dispatch without GPU dependencies; it also
+runs in CI. `tests/smoke_memory_ui.py` checks invisible wx settings/save/reset,
+automatic/manual ASR, all three generation tabs, preset creation, a two-file
+batch, both operation-dispatch paths and the manual model toggle.
+
+Final full regression: **95 pytest tests passed, zero skipped, 347 subtests
+passed** (including the real-model LoRA tests). The existing reference/batch wx
+smokes and real AMD synthesis/portable preset/clone/two-file batch smoke passed
+again with the new options left off. Ruff lint/format and `pip check` also passed.
+
+Physical release/reload validation in this follow-up is AMD-only. CUDA shares
+the same PyTorch API; Intel XPU cleanup is covered by logic tests, not by a new
+Intel hardware run.
