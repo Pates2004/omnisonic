@@ -311,6 +311,22 @@ Add `-Portable` to download the official portable Python and build the small ROC
 source package that previously failed. This network regression also tests Python
 after environment activation/renaming; it leaves its diagnostic files in `trash/`.
 
+`tests/test_operation_dispatch.py` covers queued GUI completions, cancellation
+dialogs and stale callbacks. `tests/test_demo_reference.py` covers web clone
+options, error reporting, PCM clipping and long-reference Whisper calls without
+loading model weights. These regressions also run in CI.
+
+Optional real-device web regression (use a reference longer than 30 seconds):
+
+```powershell
+venv\Scripts\python -B tests/smoke_web_inference.py --backend rocm --reference long-test.wav --output trash/web-smoke
+```
+
+This uses locally cached models, checks the web UI's registered clone/design
+callbacks and shared generation queue, and writes only diagnostic output. Choose
+a new output directory for each run. Use `tests/smoke_model_memory.py` with the
+same arguments to verify repeated model release/reload on the selected hardware.
+
 ## Project structure
 
 - `omnisonic/` — desktop application, configuration, localization, and UI state;

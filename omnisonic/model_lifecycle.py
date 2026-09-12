@@ -28,7 +28,7 @@ class ModelLifecycle:
         state.check_cancelled()
         self.configure_asr(settings)
         if self.model is None:
-            self.model = self.factory(state)
+            self.model = self.factory(state, settings)
             if self.asr_pipe is not None:
                 self.model._asr_pipe = self.asr_pipe
                 self.asr_pipe = None

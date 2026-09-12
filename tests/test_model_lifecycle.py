@@ -43,7 +43,7 @@ class ModelLifecycleTests(unittest.TestCase):
         self.loaded = []
         self.pipelines = []
 
-        def factory(state):
+        def factory(state, settings):
             model = Model()
             self.loaded.append(weakref.ref(model))
             return model
@@ -75,6 +75,13 @@ class ModelLifecycleTests(unittest.TestCase):
             self.assertIs(DEFAULT_CONFIG[key], False)
             self.assertIs(normalize_config({key: "true"})[key], False)
             self.assertIs(normalize_config({key: True})[key], True)
+
+    def test_loader_receives_the_operations_settings_snapshot(self):
+        settings = {"asr_model_name": "first", "preload_asr": False}
+        self.runtime.factory = Mock(return_value=Model())
+        state = OperationState()
+        self.runtime.ensure(state, settings)
+        self.runtime.factory.assert_called_once_with(state, settings)
 
     def test_all_policy_combinations_and_second_use(self):
         for unload_asr in (False, True):
@@ -154,8 +161,8 @@ class ModelLifecycleTests(unittest.TestCase):
     def test_failed_loading_can_be_retried(self):
         good_factory = self.runtime.factory
 
-        def bad_factory(state):
-            model = good_factory(state)
+        def bad_factory(state, settings):
+            model = good_factory(state, settings)
             assert model is not None
             raise RuntimeError("load failed")
 

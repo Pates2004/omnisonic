@@ -1914,14 +1914,15 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.OnStopAudio(event)
 
     def OnStopOperation(self, event):
-        if self.current_op and not self.current_op.finished:
+        state = self.current_op
+        if state is not None and not state.finished:
             dlg = wx.MessageDialog(
                 self, self._("stop_confirm"), self._("warning_title"), wx.YES_NO | wx.ICON_QUESTION
             )
             confirmed = dlg.ShowModal() == wx.ID_YES
             dlg.Destroy()
-            if confirmed:
-                self.current_op.request_cancel()
+            if confirmed and self.current_op is state and not state.finished:
+                state.request_cancel()
                 self.btn_stop.Disable()
                 self.Log(self._("cancel_pending"))
 
@@ -1992,7 +1993,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         wx.CallAfter(self._MaybeAutoTranscribeReference)
 
     def RunOperation(self, title_key, msg_key, worker_func, *args, success_callback=None):
-        if self.current_op and not self.current_op.finished:
+        # Worker completion is not GUI completion: its result/callback can still
+        # be queued, or displaying a dialog that dispatches more wx events.
+        if self.current_op is not None:
             wx.MessageBox(
                 self._("operation_busy"),
                 self._("warning_title"),
@@ -2005,9 +2008,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             self.current_op = dlg.state
             self._set_operation_controls_enabled(False)
             state = dlg.ShowModal()
-            self.current_op = None
-            self._set_operation_controls_enabled(True)
-            self._complete_operation(state, success_callback)
+            self.EndOperation(state, success_callback)
             return state
         else:
             self.Log(self._(msg_key))
@@ -2027,14 +2028,16 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             return state
 
     def EndOperation(self, state, success_callback):
+        if self.current_op is not state:
+            return  # Ignore stale/duplicate completion events.
         self.prog_timer.Stop()
         self.gauge.SetValue(0)
         self.btn_stop.Disable()
-
-        self._set_operation_controls_enabled(True)
-        if self.current_op is state:
+        try:
+            self._complete_operation(state, success_callback)
+        finally:
             self.current_op = None
-        self._complete_operation(state, success_callback)
+            self._set_operation_controls_enabled(True)
 
     def OnOpenSettings(self, event):
         dlg = SettingsDialog(self, is_first_run=False, current_cfg=self.cfg.copy())
@@ -2067,9 +2070,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             self.ApplyFontSize()
             if old_lang != self.cfg["language"]:
                 wx.MessageBox(self._("restart_lang"), self._("info_title"))
-            if old_asr != self.cfg.get("asr_model_name") and not (
-                self.current_op and not self.current_op.finished
-            ):
+            if old_asr != self.cfg.get("asr_model_name") and self.current_op is None:
                 self._models.configure_asr(self.cfg)
                 self._models.collect_if_needed()
             if self.model and old_preload != self.cfg.get("preload_asr", False):
@@ -2077,14 +2078,15 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         dlg.Destroy()
 
     def OnCloseWindow(self, event):
-        if self.current_op and not self.current_op.finished:
+        state = self.current_op
+        if state is not None:
             dlg = wx.MessageDialog(
                 self, self._("close_busy"), self._("warning_title"), wx.YES_NO | wx.ICON_QUESTION
             )
             confirmed = dlg.ShowModal() == wx.ID_YES
             dlg.Destroy()
-            if confirmed:
-                self.current_op.request_cancel()
+            if confirmed and self.current_op is state and not state.finished:
+                state.request_cancel()
                 self.Log(self._("cancel_pending"))
             event.Veto()
             return
@@ -2528,7 +2530,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if self.clone_ref_text.GetValue().strip():
             self._auto_reference_pending = False
             return
-        if not self._CanUseModel() or (self.current_op and not self.current_op.finished):
+        if not self._CanUseModel() or self.current_op is not None:
             return  # Retried once the model/current operation has finished.
         if getattr(self, "rec_stream", None) is not None:
             self._reference_timer = wx.CallLater(600, self._MaybeAutoTranscribeReference)
@@ -2543,7 +2545,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.OnTranscribeReference(None, automatic=True)
 
     def OnTranscribeReference(self, event, automatic=False):
-        if self.current_op and not self.current_op.finished:
+        if self.current_op is not None:
             return
         if not self._CanUseModel():
             wx.MessageBox(self._("msg_load_first"), self._("error_title"))
@@ -2640,7 +2642,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                         selection = index
                         break
             self.list_presets.SetSelection(selection)
-        if not (self.current_op and not self.current_op.finished):
+        if self.current_op is None:
             self._set_operation_controls_enabled(True)
 
     def Log(self, msg, success=False):
@@ -2655,7 +2657,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             self.OnToggleModel(None)
 
     def OnToggleModel(self, event):
-        if self.current_op and not self.current_op.finished:
+        if self.current_op is not None:
             return
         if self.model is None:
 
@@ -2666,7 +2668,11 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 wx.Bell()
 
             self.RunOperation(
-                "op_load_title", "op_load_msg", self._EnsureModelWorker, success_callback=on_success
+                "op_load_title",
+                "op_load_msg",
+                self._EnsureModelWorker,
+                dict(self.cfg),
+                success_callback=on_success,
             )
         else:
 
@@ -2682,26 +2688,26 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 success_callback=on_success,
             )
 
-    def _LoadModelWorker(self, state):
+    def _LoadModelWorker(self, state, settings):
         state.check_cancelled()
         device = accelerator_info.device
         dtype = preferred_dtype(accelerator_info, torch)
         kwargs = {
             "device_map": device,
             "dtype": dtype,
-            "load_asr": self.cfg.get("preload_asr", False) and self._models.asr_pipe is None,
+            "load_asr": settings.get("preload_asr", False) and self._models.asr_pipe is None,
             "asr_device": device,
             "attn_implementation": "sdpa",
         }
-        asr_name = self.cfg.get("asr_model_name")
+        asr_name = settings.get("asr_model_name")
         if asr_name:
             kwargs["asr_model_name"] = asr_name
         model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", **kwargs)
         return model
 
-    def _EnsureModelWorker(self, state):
+    def _EnsureModelWorker(self, state, settings):
         try:
-            self._models.ensure(state, self.cfg)
+            self._models.ensure(state, settings)
         except Exception:
             self._models.release_all()
             raise

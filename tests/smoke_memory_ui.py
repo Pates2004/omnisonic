@@ -77,7 +77,7 @@ def main():
         def ApplyConsoleState(self):
             pass
 
-        def _LoadModelWorker(self, state):
+        def _LoadModelWorker(self, state, settings):
             model = Model()
             loaded.append(weakref.ref(model))
             return model

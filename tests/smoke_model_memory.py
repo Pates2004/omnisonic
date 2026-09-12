@@ -49,7 +49,7 @@ def main():
         print(json.dumps(result), flush=True)
         return result["allocated"]
 
-    def factory(state):
+    def factory(state, settings):
         model = OmniVoice.from_pretrained(
             "k2-fsa/OmniVoice",
             device_map=info.device,

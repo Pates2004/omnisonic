@@ -133,7 +133,7 @@ class BatchTabMixin:
             self.batch_list.SetItem(index, 2, item.output or self._(item.error))
 
     def OnBatchRemove(self, event):
-        if self.current_op and not self.current_op.finished:
+        if self.current_op is not None:
             return
         selected = []
         index = self.batch_list.GetFirstSelected()
@@ -145,7 +145,7 @@ class BatchTabMixin:
         self._refresh_batch_list()
 
     def OnBatchClear(self, event):
-        if not self.current_op or self.current_op.finished:
+        if self.current_op is None:
             self.batch_items.clear()
             self._refresh_batch_list()
 
