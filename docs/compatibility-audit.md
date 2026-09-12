@@ -58,3 +58,46 @@ PyTorch installer profile.
 
 Tests reduce regression risk; they cannot guarantee zero bugs on every device,
 driver release or input file.
+
+## AMD follow-up — 2026-09-12
+
+Repeated on Windows with AMD Radeon 8060S, Python 3.12.10,
+PyTorch `2.9.1+rocm7.2.1`, Transformers 5.17.0 and Accelerate 1.15.0.
+The actual cached OmniVoice checkpoint was used (revision
+`c5fdb5ccb189668d56333f77ba2629f4cd7535f4`), with PEFT 0.20.0 installed
+in an isolated diagnostic directory, not into the running desktop environment.
+
+- Full pytest suite: **81 passed, zero skipped**, plus 340 successful subtests.
+  All five previously skipped model-dependent LoRA tests ran.
+- LoRA: frozen base/trainable adapters, CPU forward/backward, a real AMD optimizer
+  step, checkpoint save/resume (including restored weights and optimizer momentum),
+  adapter merging and loading the resulting deployment model passed.
+- Real AMD synthesis, portable preset save/load, voice cloning and a two-file
+  synthesis batch passed.
+- Whisper `openai/whisper-large-v3-turbo` transcribed a 52.36-second synthetic
+  reference on AMD, including the final test phrase beyond the 30-second boundary.
+- Invisible wx tests passed for automatic/manual transcription, stale results,
+  manual edits, failure/cancellation, portable settings and batch folder structure.
+- Launcher tests passed, including downloading portable CPython, building the
+  ROCm source package and running Python/pip after transactional renaming.
+  Power Switch transfer/rollback and batch path-quoting tests also passed.
+- Ruff lint/format and the installed environment's `pip check` passed.
+
+The first LoRA run exposed a real incompatibility: this native Windows ROCm build
+has no c10d (`torch.distributed.is_available()` is false), but Accelerate 1.15's
+automatic model placement imports DTensor unconditionally. Training now supplies
+explicit placement through Accelerate's public API only on non-distributed builds.
+It does not patch installed libraries, replace PyTorch, or claim multi-GPU support.
+Distributed-capable builds retain upstream placement behavior.
+
+Upstream warnings about optional experimental AMD attention kernels, MIOpen
+workspace fallback and deprecated Transformers options were visible; these test
+runs nevertheless completed successfully. Experimental kernels were not forced on.
+This is a single-device regression check, not a long training/stability benchmark.
+CUDA and Intel hardware were not available for a new physical-device retest here.
+
+Whisper lifetime was also checked in the desktop code: `preload_asr=false` is the
+default and delays loading until first use. It does **not** enable automatic
+offloading; the pipeline remains cached until the model is unloaded/replaced or
+the application closes. Automatic reference transcription is a separate,
+default-enabled setting.

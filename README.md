@@ -239,6 +239,12 @@ ready. You can edit the result or disable this option and use **Transcribe**
 manually. Disabling it only disables proactive transcription on file selection;
 the engine still needs a transcript when creating a voice prompt and obtains one
 if you generate/save a preset with an empty reference-text field.
+**Preload ASR** is a separate option and is disabled by default. When disabled,
+Whisper loads on first use, not together with the synthesis model. Once loaded,
+it stays in memory for subsequent transcriptions; it is not automatically
+offloaded to CPU or unloaded after each file. Unloading the OmniVoice model or
+closing the application releases it. Changing the preload setting takes effect
+after reloading the model; it does not unload an already loaded Whisper.
 Whisper handles audio longer than 30 seconds using timestamp-enabled long-form
 generation, but only plain text is inserted into the reference field. It uses
 the same PyTorch accelerator as synthesis, including AMD ROCm; whisper.cpp is
