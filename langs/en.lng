@@ -274,6 +274,7 @@
     "copy_diagnostics": "Copy diagnostics",
     "diagnostics_copied": "Diagnostics copied to the clipboard.",
     "clipboard_failed": "The clipboard could not be opened. Try again.",
+    "auto_transcribe_reference": "Automatically transcribe reference audio files",
     "batch_title": "Batch processing",
     "batch_description": "Add TXT or Markdown files. Each file becomes a separate WAV using the selected voice mode and the current voice/advanced settings. Markdown is read as plain text. Completed files are skipped when retrying.",
     "batch_add_files": "Add files",

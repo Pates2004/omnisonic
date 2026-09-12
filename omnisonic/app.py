@@ -790,6 +790,13 @@ class SettingsDialog(wx.Dialog):
             self.chk_preload_asr.SetValue(self.cfg.get("preload_asr", False))
             vbox_sys.Add(self.chk_preload_asr, 0, wx.ALL | wx.EXPAND, 5)
 
+            self.chk_auto_transcribe = wx.CheckBox(
+                tab_sys, label=self._("auto_transcribe_reference")
+            )
+            self.chk_auto_transcribe.SetName(self._("auto_transcribe_reference"))
+            self.chk_auto_transcribe.SetValue(self.cfg.get("auto_transcribe_reference", True))
+            vbox_sys.Add(self.chk_auto_transcribe, 0, wx.ALL | wx.EXPAND, 5)
+
             self.chk_clean_temp = wx.CheckBox(tab_sys, label=self._("clean_temp_lbl"))
             self.chk_clean_temp.SetName(self._("clean_temp_lbl"))
             self.chk_clean_temp.SetValue(self.cfg.get("clean_temp", True))
@@ -1067,6 +1074,7 @@ class SettingsDialog(wx.Dialog):
                 "preset_display": self.cb_preset_disp.GetSelection(),
                 "asr_model": self.cb_asr.GetValue(),
                 "preload_asr": self.chk_preload_asr.GetValue(),
+                "auto_transcribe_reference": self.chk_auto_transcribe.GetValue(),
                 "clean_temp": self.chk_clean_temp.GetValue(),
                 "force_splash": self.chk_force_splash.GetValue(),
                 "show_progress": self.chk_show_progress.GetValue(),
@@ -1324,6 +1332,7 @@ class SettingsDialog(wx.Dialog):
             self.cb_preset_disp.SetSelection(0)
             self.cb_asr.SetValue(defaults["asr_model_name"])
             self.chk_preload_asr.SetValue(defaults["preload_asr"])
+            self.chk_auto_transcribe.SetValue(defaults["auto_transcribe_reference"])
             self.chk_force_splash.SetValue(defaults["force_splash"])
             self.chk_show_progress.SetValue(defaults["show_progress"])
             self.chk_fake_progress.SetValue(defaults["fake_progress_numbers"])
@@ -1495,6 +1504,7 @@ class SettingsDialog(wx.Dialog):
             self.cfg["normalize_text"] = self.chk_normalize_text.GetValue()
             self.cfg["clean_temp"] = self.chk_clean_temp.GetValue()
             self.cfg["preload_asr"] = self.chk_preload_asr.GetValue()
+            self.cfg["auto_transcribe_reference"] = self.chk_auto_transcribe.GetValue()
             self.cfg["auto_save_gen"] = self.chk_auto_gen.GetValue()
             self.cfg["auto_save_gen_folder"] = self.chk_auto_gen_folder.GetValue()
             self.cfg["generated_audio_directory"] = generated_directory
@@ -1559,6 +1569,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.audio_data = None
         self.sample_rate = 24000
         self.current_op = None
+        self._reference_revision = 0
+        self._auto_reference_pending = False
+        self._reference_timer = None
 
         ensure_user_directories()
         self.ApplyConsoleState()
@@ -1906,6 +1919,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 self.Log(message)
                 wx.MessageBox(message, self._("error_title"), wx.OK | wx.ICON_ERROR)
 
+        wx.CallAfter(self._MaybeAutoTranscribeReference)
+
     def RunOperation(self, title_key, msg_key, worker_func, *args, success_callback=None):
         if self.current_op and not self.current_op.finished:
             wx.MessageBox(
@@ -1957,6 +1972,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             old_lang = self.cfg["language"]
             old_asr = self.cfg.get("asr_model_name")
             old_preload = self.cfg.get("preload_asr", False)
+            old_auto_transcribe = self.cfg.get("auto_transcribe_reference", True)
             old_generated_directory = self.cfg["generated_audio_directory"]
             try:
                 SaveBasicConfig(dlg.cfg)
@@ -1969,6 +1985,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 dlg.Destroy()
                 return
             self.cfg = dlg.cfg
+            if not old_auto_transcribe and self.cfg.get("auto_transcribe_reference", True):
+                self._auto_reference_pending = True
+                wx.CallAfter(self._MaybeAutoTranscribeReference)
             if old_generated_directory != self.cfg["generated_audio_directory"]:
                 # Running batches retain the output path captured by OnGenBatch.
                 self.batch_output.SetValue(self.cfg["generated_audio_directory"])
@@ -2057,6 +2076,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 logging.warning("Could not close recording stream: %s", exc)
 
         self.OnStopAudio(None)
+        if self._reference_timer is not None:
+            self._reference_timer.Stop()
         self.Destroy()
 
     def SetupCloneTab(self, tab):
@@ -2082,6 +2103,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         hbox_ref = wx.BoxSizer(wx.HORIZONTAL)
         self.clone_ref_audio = wx.TextCtrl(tab)
         self.clone_ref_audio.SetName(self._("ref_audio"))
+        self.clone_ref_audio.Bind(wx.EVT_TEXT, self.OnReferenceAudioChanged)
         btn_browse = wx.Button(tab, label=self._("browse"))
         btn_browse.Bind(wx.EVT_BUTTON, self.OnBrowseRefAudio)
 
@@ -2415,7 +2437,42 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     def OnBrowseRefAudio(self, event):
         self.BrowseFor(self.clone_ref_audio)
 
-    def OnTranscribeReference(self, event):
+    def OnReferenceAudioChanged(self, event):
+        # Invalidate old text/results even if a new recording reused the same filename.
+        self._reference_revision += 1
+        self.clone_ref_text.ChangeValue("")
+        self._auto_reference_pending = True
+        if self._reference_timer is not None:
+            self._reference_timer.Stop()
+        self._reference_timer = wx.CallLater(600, self._MaybeAutoTranscribeReference)
+        event.Skip()
+
+    def _MaybeAutoTranscribeReference(self):
+        if not self or self.IsBeingDeleted() or not self._auto_reference_pending:
+            return
+        if not self.cfg.get("auto_transcribe_reference", True):
+            self._auto_reference_pending = False
+            return
+        if self.clone_ref_text.GetValue().strip():
+            self._auto_reference_pending = False
+            return
+        if not self.model or (self.current_op and not self.current_op.finished):
+            return  # Retried once the model/current operation has finished.
+        if getattr(self, "rec_stream", None) is not None:
+            self._reference_timer = wx.CallLater(600, self._MaybeAutoTranscribeReference)
+            return
+        active = wx.GetActiveWindow()
+        if isinstance(active, wx.Dialog) and active.IsModal():
+            self._reference_timer = wx.CallLater(600, self._MaybeAutoTranscribeReference)
+            return
+        path = self.clone_ref_audio.GetValue().strip()
+        if not os.path.isfile(path):
+            return
+        self.OnTranscribeReference(None, automatic=True)
+
+    def OnTranscribeReference(self, event, automatic=False):
+        if self.current_op and not self.current_op.finished:
+            return
         if not self.model:
             wx.MessageBox(self._("msg_load_first"), self._("error_title"))
             return
@@ -2426,10 +2483,22 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             )
             return
 
+        self._auto_reference_pending = False  # No automatic retry loop after errors/cancellation.
+        revision = self._reference_revision
+        previous_text = self.clone_ref_text.GetValue()
+
         def on_success(text):
+            if (
+                self._reference_revision != revision
+                or self.clone_ref_audio.GetValue().strip() != path
+            ):
+                return
+            if self.clone_ref_text.GetValue() != previous_text:
+                return  # The user edited the transcript while the worker was running.
             self.clone_ref_text.SetValue(text)
             self.Log(self._("transcribe_complete"), success=True)
-            self.clone_ref_text.SetFocus()
+            if not automatic:
+                self.clone_ref_text.SetFocus()
 
         self.RunOperation(
             "op_transcribe_title",

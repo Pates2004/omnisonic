@@ -14,6 +14,28 @@ function Assert-Test {
     if (-not $Condition) { throw "Regression failed: $Message" }
 }
 
+if (Get-Command Get-SettingsPath -ErrorAction SilentlyContinue) {
+    Assert-Test ((Get-SettingsPath) -eq (Join-Path $ProjectRoot 'config\settings.json')) 'Portable GUI settings path'
+    Assert-Test ($ModeFile -eq (Join-Path $ProjectRoot 'config\desktop-python-mode.txt')) 'Portable Python preference'
+    Assert-Test ($BackendFile -eq (Join-Path $ProjectRoot 'config\desktop-backend.txt')) 'Portable backend preference'
+    & {
+        $ProjectRoot = Join-Path $testProject ('trash\launcher-config-' + [Guid]::NewGuid().ToString('N'))
+        $WorkDir = Join-Path $ProjectRoot '.launcher'
+        $ModeFile = Join-Path $ProjectRoot 'config\desktop-python-mode.txt'
+        $BackendFile = Join-Path $ProjectRoot 'config\desktop-backend.txt'
+        New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
+        'Portable' | Set-Content -LiteralPath (Join-Path $WorkDir 'desktop-python-mode.txt') -Encoding ASCII
+        'rocm' | Set-Content -LiteralPath (Join-Path $WorkDir 'desktop-backend.txt') -Encoding ASCII
+        Assert-Test ((Get-SavedText $ModeFile) -eq 'Portable') 'Old Python preference remains readable'
+        Assert-Test ((Get-SavedText $BackendFile) -eq 'rocm') 'Old backend preference remains readable'
+        Save-BackendPreference 'cpu'
+        Assert-Test ((Get-SavedText $BackendFile) -eq 'cpu') 'New backend overrides legacy preference'
+        '{"hide_console":false,"first_run_done":true}' | Set-Content -LiteralPath (Get-SettingsPath) -Encoding UTF8
+        Assert-Test (-not (Get-HideConsolePreference)) 'Portable console preference wins over old profile'
+        Assert-Test ((Get-PreferenceSettingsPath) -eq (Get-SettingsPath)) 'Portable settings have priority'
+    }
+}
+
 $matrix = Get-BackendMatrix
 $profile = Get-BackendProfile $matrix "rocm"
 $apu = @([pscustomobject]@{

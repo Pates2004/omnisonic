@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 import sys
 import tempfile
 from copy import deepcopy
@@ -24,13 +23,9 @@ logger = logging.getLogger(__name__)
 APP_NAME = "OmniSonic"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PACKAGE_DIR = Path(__file__).resolve().parent
-LEGACY_CONFIG_FILE = PROJECT_ROOT / "settings.json"
 
 
-def _default_data_dir() -> Path:
-    override = os.environ.get("OMNISONIC_DATA_DIR")
-    if override:
-        return Path(override).expanduser().resolve()
+def _legacy_profile_dir() -> Path:
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
         return base / APP_NAME
@@ -53,8 +48,8 @@ def _program_dir() -> Path:
     return Path.cwd().resolve()
 
 
-APP_DATA_DIR = _default_data_dir()
 PROGRAM_DIR = _program_dir()
+APP_DATA_DIR = PROGRAM_DIR / "config"
 CONFIG_FILE = APP_DATA_DIR / "settings.json"
 PRESETS_DIR = PROGRAM_DIR / "presets"
 TEMP_DIR = APP_DATA_DIR / "temp"
@@ -110,6 +105,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "preset_display_mode": "name",
     "asr_model_name": "openai/whisper-large-v3-turbo",
     "preload_asr": False,
+    "auto_transcribe_reference": True,
     "normalize_text": False,
     "use_duration": False,
     "duration_val": 5.0,
@@ -261,13 +257,27 @@ def ensure_user_directories() -> None:
 
 
 def migrate_legacy_user_data() -> None:
-    """Migrate the legacy settings file; presets are intentionally portable only."""
+    """One-time settings copy into program/config; never remove the original."""
     ensure_user_directories()
-    if LEGACY_CONFIG_FILE.exists() and not CONFIG_FILE.exists():
+    if CONFIG_FILE.exists():
+        return
+    # A relocated/test application must not import the real user's settings.
+    candidates = [PROGRAM_DIR / "settings.json"]
+    if PROGRAM_DIR == PROJECT_ROOT:
+        candidates.insert(0, _legacy_profile_dir() / "settings.json")
+    for source in candidates:
+        if not source.is_file():
+            continue
         try:
-            shutil.copy2(LEGACY_CONFIG_FILE, CONFIG_FILE)
-        except OSError as exc:
-            logger.warning("Could not migrate legacy settings: %s", exc)
+            data = json.loads(source.read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict):
+                raise ValueError("configuration root must be a JSON object")
+        except (OSError, UnicodeError, ValueError) as exc:
+            logger.warning("Could not read old settings %s: %s", source, exc)
+            continue
+        save_config(data, CONFIG_FILE)
+        logger.info("Copied settings from %s to %s; original retained", source, CONFIG_FILE)
+        break
 
 
 def locale_search_directories() -> tuple[Path, ...]:

@@ -30,6 +30,7 @@ examples/exp*
 *.wav
 *.jsonl
 settings.json
+/config/
 start.bat 
 # Private user data. Voice presets may contain voice tokens and transcripts.
 /presets/

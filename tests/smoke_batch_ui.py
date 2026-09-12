@@ -15,7 +15,6 @@ from unittest.mock import Mock, patch
 def main():
     root = Path(__file__).resolve().parents[1]
     scratch = Path(tempfile.mkdtemp(prefix="batch-ui-", dir=root / "trash"))
-    os.environ["OMNISONIC_DATA_DIR"] = str(scratch / "settings")
     os.environ["OMNISONIC_APP_DIR"] = str(scratch / "program")
 
     import numpy as np

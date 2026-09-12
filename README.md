@@ -222,9 +222,29 @@ OmniVoice revision, GUI feature coverage and hardware-test limitations.
 
 Voice presets are stored in the portable `presets/` directory next to the
 application. This makes it possible to move or back up the program together
-with all saved voices. Settings and temporary recordings remain under the
-user's OmniSonic application-data directory (normally
-`%LOCALAPPDATA%\OmniSonic`). No other preset location is scanned or migrated.
+with all saved voices. Settings are stored in `config/settings.json` next to
+the program; temporary reference recordings use `config/temp/`. On the first
+start after updating, existing user-profile settings (or the old root-level
+`settings.json`) are copied once if the new file does not exist. The original
+is retained; subsequent reads and writes use the portable configuration only.
+The entire `config/` directory is ignored by Git. No other preset location is
+scanned or migrated. The program folder must be writable.
+Launcher Python/backend preferences also live in `config/`; Power Switch does
+not transfer those hardware-specific preferences to another PC.
+
+**Automatically transcribe reference audio files** is enabled by default in
+Settings. Selecting/pasting a new reference path or finishing a microphone
+recording clears the previous transcript and starts Whisper once the model is
+ready. You can edit the result or disable this option and use **Transcribe**
+manually. Disabling it only disables proactive transcription on file selection;
+the engine still needs a transcript when creating a voice prompt and obtains one
+if you generate/save a preset with an empty reference-text field.
+Whisper handles audio longer than 30 seconds using timestamp-enabled long-form
+generation, but only plain text is inserted into the reference field. It uses
+the same PyTorch accelerator as synthesis, including AMD ROCm; whisper.cpp is
+not a required dependency. For voice cloning, prefer a clean 3–10-second sample
+(the engine warns about long prompts); a full transcript prevents trimming the
+reference to avoid mismatching the audio and its text.
 
 Voice presets contain derived voice tokens and may contain a reference
 transcript. Treat them as private data. The complete `presets/` tree is ignored

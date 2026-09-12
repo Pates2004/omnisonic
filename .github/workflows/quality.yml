@@ -25,7 +25,7 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q omnisonic omnivoice tests wx_app.py
       - name: Test desktop logic
-        run: python -m unittest -v tests.test_desktop_logic tests.test_runtime_requirements tests.test_batch
+        run: python -m unittest -v tests.test_desktop_logic tests.test_runtime_requirements tests.test_batch tests.test_reference_audio
       - name: Parse and self-test the desktop launcher
         shell: powershell
         run: |

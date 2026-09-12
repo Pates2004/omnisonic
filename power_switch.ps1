@@ -13,9 +13,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $SwitchRoot = $PSScriptRoot
 $SwitchBackups = Join-Path $SwitchRoot 'power-switch-backups'
-$SwitchData = if ($env:OMNISONIC_DATA_DIR) {
-    [IO.Path]::GetFullPath($env:OMNISONIC_DATA_DIR)
-} else { Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'OmniSonic' }
+$SwitchData = Join-Path $SwitchRoot 'config'
 $SwitchDocuments = [Environment]::GetFolderPath('MyDocuments')
 if (-not $SwitchDocuments) {
     $SwitchDocuments = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Documents'
@@ -93,6 +91,8 @@ function Get-SwitchFiles {
 function Get-SwitchSettingsPath {
     $path = Join-Path $SwitchData 'settings.json'
     if (Test-Path -LiteralPath $path) { return $path }
+    $oldProfile = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'OmniSonic\settings.json'
+    if (Test-Path -LiteralPath $oldProfile) { return $oldProfile }
     $legacy = Join-Path $SwitchRoot 'settings.json'
     if (Test-Path -LiteralPath $legacy) { return $legacy }
     return $path

@@ -410,6 +410,7 @@ class OmniVoice(PreTrainedModel):
             model=model_name,
             dtype=asr_dtype,
             device=device,
+            model_kwargs={"attn_implementation": "sdpa"},
         )
         logger.info("ASR model loaded on %s.", device)
 
@@ -423,7 +424,7 @@ class OmniVoice(PreTrainedModel):
         Args:
             audio: File path or ``(waveform, sample_rate)`` tuple.
                 Waveform can be a numpy array or torch.Tensor of shape
-                ``(1, T)`` or ``(T,)``.
+                ``(channels, T)`` or ``(T,)``; channels are mixed to mono.
 
         Returns:
             Transcribed text.
@@ -432,17 +433,21 @@ class OmniVoice(PreTrainedModel):
             raise RuntimeError("ASR model is not loaded. Call model.load_asr_model() first.")
 
         if isinstance(audio, str):
-            return self._asr_pipe(audio)["text"].strip()
+            return self._asr_pipe(audio, return_timestamps=True)["text"].strip()
         else:
             waveform, sr = audio
             if isinstance(waveform, torch.Tensor):
-                waveform = waveform.cpu().numpy()
-            waveform = np.squeeze(waveform)  # (1, T) or (T,) → (T,)
+                waveform = waveform.detach().cpu().float().numpy()
+            waveform = np.asarray(waveform, dtype=np.float32)
+            if waveform.ndim == 2:
+                waveform = waveform.mean(axis=0)  # (channels, time) -> mono
+            if waveform.ndim != 1 or not waveform.size or not np.isfinite(waveform).all():
+                raise ValueError("Reference audio must contain finite, non-empty samples")
             audio_input = {
                 "array": waveform,
                 "sampling_rate": sr,
             }
-            return self._asr_pipe(audio_input)["text"].strip()
+            return self._asr_pipe(audio_input, return_timestamps=True)["text"].strip()
 
     def get_input_embeddings(self):
         return self.llm.get_input_embeddings()

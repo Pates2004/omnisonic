@@ -20,8 +20,9 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PortableDir = Join-Path $ProjectRoot "env"
 $VenvDir = Join-Path $ProjectRoot "venv"
 $WorkDir = Join-Path $ProjectRoot ".launcher"
-$ModeFile = Join-Path $WorkDir "desktop-python-mode.txt"
-$BackendFile = Join-Path $WorkDir "desktop-backend.txt"
+$ConfigDir = Join-Path $ProjectRoot "config"
+$ModeFile = Join-Path $ConfigDir "desktop-python-mode.txt"
+$BackendFile = Join-Path $ConfigDir "desktop-backend.txt"
 $BackendMatrixPath = Join-Path $ProjectRoot "installer_backends.json"
 $RuntimeRequirementsPath = Join-Path $ProjectRoot "requirements-desktop.txt"
 $PythonVersion = "3.12.10"
@@ -70,16 +71,15 @@ function Show-LauncherConsole { Set-LauncherConsoleVisible $true }
 function Hide-LauncherConsole { Set-LauncherConsoleVisible $false }
 
 function Get-SettingsPath {
-    if ($env:OMNISONIC_DATA_DIR) {
-        return Join-Path $env:OMNISONIC_DATA_DIR "settings.json"
-    }
-    $localData = [Environment]::GetFolderPath("LocalApplicationData")
-    return Join-Path (Join-Path $localData "OmniSonic") "settings.json"
+    return Join-Path $ProjectRoot "config\settings.json"
 }
 
 function Get-PreferenceSettingsPath {
     $settingsPath = Get-SettingsPath
     if (Test-Path -LiteralPath $settingsPath) { return $settingsPath }
+    # Read old preferences only until the app performs its one-time portable copy.
+    $oldProfile = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "OmniSonic\settings.json"
+    if (Test-Path -LiteralPath $oldProfile) { return $oldProfile }
     $legacyPath = Join-Path $ProjectRoot "settings.json"
     if (Test-Path -LiteralPath $legacyPath) { return $legacyPath }
     return $settingsPath
@@ -328,6 +328,10 @@ function Resolve-RequestedBackend {
 
 function Get-SavedText {
     param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path) -and ($Path -eq $ModeFile -or $Path -eq $BackendFile)) {
+        # One-time legacy read; successful startup writes preferences into config/.
+        $Path = Join-Path $WorkDir (Split-Path -Leaf $Path)
+    }
     if (Test-Path -LiteralPath $Path) {
         return (Get-Content -LiteralPath $Path -Raw).Trim()
     }
@@ -336,7 +340,7 @@ function Get-SavedText {
 
 function Save-BackendPreference {
     param([string]$RequestedBackend)
-    New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
+    New-Item -ItemType Directory -Path (Split-Path -Parent $BackendFile) -Force | Out-Null
     $RequestedBackend | Set-Content -LiteralPath $BackendFile -Encoding ASCII
 }
 
@@ -998,6 +1002,7 @@ function Invoke-Main {
             $python = Install-PythonBootstrapTransaction $selectedMode $systemPython `
                 $profile $activeRoot
         }
+        New-Item -ItemType Directory -Path (Split-Path -Parent $ModeFile) -Force | Out-Null
         $selectedMode | Set-Content -LiteralPath $ModeFile -Encoding ASCII
         if ($BackendWasExplicit) { Save-BackendPreference $requestedBackend }
         Write-Host "Bootstrap test completed with $selectedMode Python: $python"
@@ -1015,9 +1020,13 @@ function Invoke-Main {
         $profile = $installed.Profile
         $requestedBackend = $installed.RequestedBackend
     }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $ModeFile) -Force | Out-Null
     $selectedMode | Set-Content -LiteralPath $ModeFile -Encoding ASCII
     if ($BackendWasExplicit -or $requestedBackend -ne $initialRequestedBackend) {
         Save-BackendPreference $requestedBackend
+    }
+    elseif ($savedBackend -and -not (Test-Path -LiteralPath $BackendFile)) {
+        Save-BackendPreference $savedBackend
     }
     if ($InstallOnly) {
         Write-Host "Runtime installation and validation completed successfully: $python"

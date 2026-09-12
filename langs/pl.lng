@@ -274,6 +274,7 @@
     "copy_diagnostics": "Kopiuj diagnostykę",
     "diagnostics_copied": "Skopiowano diagnostykę do schowka.",
     "clipboard_failed": "Nie udało się otworzyć schowka. Spróbuj ponownie.",
+    "auto_transcribe_reference": "Automatycznie transkrybuj wzorcowe pliki audio",
     "batch_title": "Przetwarzanie masowe",
     "batch_description": "Dodaj pliki TXT lub Markdown. Z każdego powstanie osobny WAV według wybranego trybu głosu i bieżących ustawień głosu oraz zaawansowanych. Markdown jest czytany jak zwykły tekst. Ponowienie pomija ukończone pliki.",
     "batch_add_files": "Dodaj pliki",

@@ -15,9 +15,10 @@ function Assert-Rejected {
     throw "Expected failure: $Pattern"
 }
 
+Assert-Test ($SwitchData -eq (Join-Path $SwitchRoot 'config')) 'Power Switch uses program/config'
 $fixture = Join-Path $SwitchRoot ('trash\power-switch-tests-' + [Guid]::NewGuid().ToString('N'))
 $SwitchRoot = Join-Path $fixture 'old-pc'
-$SwitchData = Join-Path $fixture 'old-settings'
+$SwitchData = Join-Path $SwitchRoot 'config'
 $SwitchDocuments = Join-Path $fixture 'old-documents'
 $SwitchBackups = Join-Path $fixture 'backups'
 $audioFolder = Join-Path $fixture 'custom-audio'
@@ -41,7 +42,7 @@ Assert-Rejected { Export-SwitchProfile $export $false } 'non-existing'
 Assert-Rejected { Export-SwitchProfile (Join-Path $SwitchRoot 'presets\nested-export') $false } 'inside data'
 
 $SwitchRoot = Join-Path $fixture 'new-pc'
-$SwitchData = Join-Path $fixture 'new-settings'
+$SwitchData = Join-Path $SwitchRoot 'config'
 $SwitchDocuments = Join-Path $fixture 'new-documents'
 $targetSettings = Join-Path $SwitchData 'settings.json'
 $targetPreset = Join-Path $SwitchRoot 'presets\voice.pt'
