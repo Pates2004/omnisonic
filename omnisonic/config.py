@@ -240,10 +240,10 @@ def save_config(config: Mapping[str, Any], path: Path | str = CONFIG_FILE) -> No
         with tempfile.NamedTemporaryFile(
             "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
         ) as temp_file:
+            temp_name = temp_file.name
             temp_file.write(payload)
             temp_file.flush()
             os.fsync(temp_file.fileno())
-            temp_name = temp_file.name
         os.replace(temp_name, path)
     finally:
         if temp_name and os.path.exists(temp_name):

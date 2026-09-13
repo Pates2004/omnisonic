@@ -119,5 +119,67 @@ class DispatchTests(unittest.TestCase):
         self.assertIsNone(self.frame.current_op)
 
 
+class ProgressDialogTests(unittest.TestCase):
+    def setUp(self):
+        self.wx = Mock(ID_YES=1, ID_OK=2, ID_CANCEL=3, YES_NO=4, ICON_QUESTION=8)
+        self.wx.CloseEvent = type("CloseEvent", (), {})
+        namespace = {"wx": self.wx}
+        tree = ast.parse(
+            (Path(__file__).resolve().parents[1] / "omnisonic/app.py").read_text(encoding="utf-8")
+        )
+        dialog_class = next(
+            n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "OperationDialog"
+        )
+        names = {"_request_cancel", "_confirm_cancel", "_finish_custom_dialog"}
+        methods = [
+            n for n in dialog_class.body if isinstance(n, ast.FunctionDef) and n.name in names
+        ]
+        exec(compile(ast.Module(body=methods, type_ignores=[]), "progress", "exec"), namespace)
+        self.holder = SimpleNamespace(
+            state=OperationState(),
+            cfg={},
+            dialog=Mock(),
+            _confirming_cancel=False,
+            _=lambda k: k,
+        )
+        for name in names:
+            setattr(self.holder, name, namespace[name].__get__(self.holder))
+
+    def test_finished_result_is_not_cancelled_after_user_confirmation(self):
+        for native in (False, True):
+            self.setUp()
+            self.holder.cfg["use_native_dialogs"] = native
+
+            def finish_while_asking():
+                self.holder.state.finished_event.set()
+                self.holder._finish_custom_dialog()
+                self.holder.dialog.EndModal.assert_not_called()
+                return self.wx.ID_YES
+
+            self.wx.MessageDialog.return_value.ShowModal.side_effect = finish_while_asking
+            self.holder._confirm_cancel()
+            self.assertFalse(self.holder.state.cancel_flag)
+            self.assertFalse(self.holder._confirming_cancel)
+            if native:
+                self.holder.dialog.EndModal.assert_not_called()
+            else:
+                self.holder.dialog.EndModal.assert_called_once_with(self.wx.ID_OK)
+
+    def test_running_operation_can_still_be_cancelled(self):
+        self.wx.MessageDialog.return_value.ShowModal.return_value = self.wx.ID_YES
+        self.holder._confirm_cancel()
+        self.assertTrue(self.holder.state.cancel_flag)
+        self.holder.dialog.EndModal.assert_not_called()
+
+    def test_duplicate_confirmation_and_completed_cancellation_are_ignored(self):
+        self.holder._confirming_cancel = True
+        self.holder._confirm_cancel()
+        self.wx.MessageDialog.assert_not_called()
+        self.holder._confirming_cancel = False
+        self.holder.state.finished_event.set()
+        self.holder._request_cancel()
+        self.assertFalse(self.holder.state.cancel_flag)
+
+
 if __name__ == "__main__":
     unittest.main()

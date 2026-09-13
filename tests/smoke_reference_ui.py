@@ -157,6 +157,16 @@ def main():
                 assert not load_config(CONFIG_FILE)["auto_transcribe_reference"]
             finally:
                 dialog.Destroy()
+            editor = desktop.PresetEditDialog(frame, frame._, "test", "Old transcript.")
+            try:
+                editor.source_ctrl.SetValue(str(scratch / "different.wav"))
+                assert editor.ref_text_ctrl.GetValue() == ""
+                editor.ref_text_ctrl.SetValue("New transcript.")
+                assert editor.ref_text_ctrl.GetValue() == "New transcript."
+                editor.source_ctrl.SetValue("")
+                assert editor.ref_text_ctrl.GetValue() == "Old transcript."
+            finally:
+                editor.Destroy()
             print(
                 "Reference auto/manual ASR, stale results, edits, errors, cancellation and portable settings: OK"
             )

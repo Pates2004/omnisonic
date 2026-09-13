@@ -28,6 +28,7 @@ from .config import (
 )
 from .batch_ui import BatchTabMixin
 from .i18n import load_locales, translate
+from .files import atomic_write, write_numbered_audio
 from .operations import OperationState, execute_worker
 from .model_lifecycle import ModelLifecycle
 from .shortcuts import (
@@ -354,6 +355,7 @@ class OperationDialog:
         self.args = args
         self.state = OperationState(name=title_key)
         self.dialog = None
+        self._confirming_cancel = False
 
     def _run_worker(self):
         execute_worker(self.state, self.worker_func, *self.args)
@@ -361,12 +363,14 @@ class OperationDialog:
             wx.CallAfter(self._finish_custom_dialog)
 
     def _finish_custom_dialog(self):
+        if self._confirming_cancel:
+            return  # Never destroy the progress window underneath its confirmation.
         if self.dialog and self.dialog.IsModal():
             result = wx.ID_OK if self.state.succeeded else wx.ID_CANCEL
             self.dialog.EndModal(result)
 
     def _request_cancel(self):
-        if self.state.cancel_flag:
+        if self.state.cancel_flag or self.state.finished:
             return
         self.state.request_cancel()
         if hasattr(self, "cancel_button"):
@@ -377,7 +381,7 @@ class OperationDialog:
     def _confirm_cancel(self, event=None):
         if isinstance(event, wx.CloseEvent):
             event.Veto()
-        if self.state.cancel_flag:
+        if self.state.cancel_flag or self.state.finished or self._confirming_cancel:
             return
         dialog = wx.MessageDialog(
             self.dialog,
@@ -385,10 +389,15 @@ class OperationDialog:
             self._("warning_title"),
             wx.YES_NO | wx.ICON_QUESTION,
         )
-        confirmed = dialog.ShowModal() == wx.ID_YES
-        dialog.Destroy()
-        if confirmed:
-            self._request_cancel()
+        self._confirming_cancel = True
+        try:
+            if dialog.ShowModal() == wx.ID_YES:
+                self._request_cancel()
+        finally:
+            dialog.Destroy()
+            self._confirming_cancel = False
+            if self.state.finished and not self.cfg.get("use_native_dialogs", False):
+                self._finish_custom_dialog()
 
     def ShowModal(self):
         use_native = self.cfg.get("use_native_dialogs", False)
@@ -624,6 +633,7 @@ class PresetEditDialog(wx.Dialog):
     def __init__(self, parent, translate_func, name, ref_text):
         super().__init__(parent, title=translate_func("preset_edit_title"), size=(620, 360))
         self._ = translate_func
+        self._original_ref_text = ref_text
 
         panel = wx.Panel(self)
         layout = wx.BoxSizer(wx.VERTICAL)
@@ -649,6 +659,7 @@ class PresetEditDialog(wx.Dialog):
         layout.Add(ref_text_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.ref_text_ctrl = wx.TextCtrl(panel, value=ref_text, style=wx.TE_MULTILINE)
         self.ref_text_ctrl.SetName(self._("preset_edit_ref_text"))
+        self.source_ctrl.Bind(wx.EVT_TEXT, self.OnSourceChanged)
         layout.Add(self.ref_text_ctrl, 1, wx.ALL | wx.EXPAND, 10)
 
         buttons = wx.BoxSizer(wx.HORIZONTAL)
@@ -659,6 +670,13 @@ class PresetEditDialog(wx.Dialog):
         layout.Add(buttons, 0, wx.ALL | wx.EXPAND, 10)
         panel.SetSizer(layout)
         self.CentreOnParent()
+
+    def OnSourceChanged(self, event):
+        # A new recording must not inherit the previous voice's transcript.
+        self.ref_text_ctrl.ChangeValue(
+            "" if self.source_ctrl.GetValue().strip() else self._original_ref_text
+        )
+        event.Skip()
 
     def OnBrowse(self, event):
         with wx.FileDialog(
@@ -2142,12 +2160,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 except OSError as exc:
                     logging.warning("Could not remove temporary recording: %s", exc)
 
-        if hasattr(self, "rec_stream"):
-            try:
-                self.rec_stream.stop()
-                self.rec_stream.close()
-            except Exception as exc:
-                logging.warning("Could not close recording stream: %s", exc)
+        try:
+            self._CloseRecording()
+        except Exception as exc:
+            logging.warning("Could not close recording stream: %s", exc)
 
         self.OnStopAudio(None)
         if self._reference_timer is not None:
@@ -3081,14 +3097,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
     @staticmethod
     def _SavePromptAtomically(state, prompt, path):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_name(f".{path.name}.tmp")
-        try:
-            prompt.save(str(temp_path))
-            state.check_cancelled()
-            os.replace(temp_path, path)
-        finally:
-            temp_path.unlink(missing_ok=True)
+        atomic_write(path, lambda temporary: prompt.save(str(temporary)), state.check_cancelled)
 
     def _SavePresetWorker(
         self, state, model, ref_audio, ref_text, path, preprocess_prompt, original_path=None
@@ -3392,20 +3401,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         folder = Path(
             os.path.abspath(os.path.expandvars(os.path.expanduser(str(configured_folder))))
         )
-        if folder.exists() and not folder.is_dir():
-            raise NotADirectoryError(str(folder))
-        folder.mkdir(parents=True, exist_ok=True)
-        idx = 1
-        while True:
-            fname = f"{prefix}_{idx}.wav"
-            suggested_path = safe_child_path(folder, fname)
-            if not suggested_path.exists():
-                break
-            idx += 1
-
         if skip_dialog:
-            path = suggested_path
-            sf.write(str(path), data, fs)
+            path = write_numbered_audio(
+                folder, prefix, lambda temporary: sf.write(str(temporary), data, fs)
+            )
             if self.cfg.get("confirm_success", False):
                 wx.MessageBox(
                     self._("msg_save_ok") + f"\n{path}",
@@ -3414,6 +3413,14 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 )
             return str(path)
         else:
+            # A disconnected/read-only configured folder must not prevent Save As
+            # from opening. Do not create any directory until the user confirms.
+            if not folder.is_dir():
+                folder = Path.cwd()
+            idx = 1
+            while (folder / f"{prefix}_{idx}.wav").exists():
+                idx += 1
+            fname = f"{prefix}_{idx}.wav"
             with wx.FileDialog(
                 self,
                 self._("save"),
@@ -3424,7 +3431,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             ) as fd:
                 if fd.ShowModal() != wx.ID_CANCEL:
                     path = fd.GetPath()
-                    sf.write(path, data, fs)
+                    atomic_write(path, lambda temporary: sf.write(str(temporary), data, fs))
                     if self.cfg.get("confirm_success", False):
                         wx.MessageBox(
                             self._("msg_save_ok") + f"\n{path}",
@@ -3525,23 +3532,38 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self._reset_generated_player()
         parent_tab.Layout()
 
+    def _CloseRecording(self):
+        stream = getattr(self, "rec_stream", None)
+        self.rec_stream = None
+        if stream is not None:
+            try:
+                stream.stop()
+            finally:
+                stream.close()
+
     def ToggleRecord(self, btn, path_ctrl):
-        if btn.GetLabel() == self._("rec_ref"):
+        if getattr(self, "rec_stream", None) is None:
             try:
                 btn.SetLabel(self._("stop_rec"))
                 self.rec_data = []
+                chunks = self.rec_data
                 self.rec_fs = 24000
 
                 def callback(indata, frames, time_info, status):
                     if status:
                         logging.warning("Audio input status: %s", status)
-                    self.rec_data.append(indata.copy())
+                    chunks.append(indata.copy())
 
                 self.rec_stream = sd.InputStream(
                     samplerate=self.rec_fs, channels=1, callback=callback
                 )
                 self.rec_stream.start()
             except Exception as exc:
+                try:
+                    self._CloseRecording()
+                except Exception:
+                    logging.exception("Could not close failed recording stream")
+                self.rec_data = []
                 btn.SetLabel(self._("rec_ref"))
                 wx.MessageBox(
                     self._("record_failed").format(error=str(exc)),
@@ -3551,15 +3573,14 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         else:
             btn.SetLabel(self._("rec_ref"))
             try:
-                if hasattr(self, "rec_stream") and self.rec_stream:
-                    self.rec_stream.stop()
-                    self.rec_stream.close()
-                    self.rec_stream = None
+                self._CloseRecording()
 
                 if hasattr(self, "rec_data") and self.rec_data:
                     audio = np.concatenate(self.rec_data, axis=0)
-                    RECORDED_AUDIO_FILE.parent.mkdir(parents=True, exist_ok=True)
-                    sf.write(str(RECORDED_AUDIO_FILE), audio, self.rec_fs)
+                    atomic_write(
+                        RECORDED_AUDIO_FILE,
+                        lambda temporary: sf.write(str(temporary), audio, self.rec_fs),
+                    )
                     path_ctrl.SetValue(str(RECORDED_AUDIO_FILE))
                     wx.Bell()
                     if self.cfg.get("auto_save_rec", False):
@@ -3572,6 +3593,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                     self._("error_title"),
                     wx.OK | wx.ICON_ERROR,
                 )
+            finally:
+                self.rec_data = []
 
     def OnShowTags(self, event):
         wx.MessageBox(self._("msg_tags"), self._("title_tags"), wx.OK | wx.ICON_INFORMATION)

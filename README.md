@@ -282,11 +282,21 @@ rebuild its voice data from a new source recording. The original audio path is
 not embedded in a preset, so choosing a replacement file during editing is
 optional.
 
+Choosing replacement audio in the preset editor clears the previous transcript;
+enter the new recording's text or leave it blank for Whisper. Clearing the
+replacement path restores the original transcript for rename-only editing.
+
 Generated and recorded WAV files default to
 `Documents\OmniSonic\generated` and `Documents\OmniSonic\record`. Both folders
 can be entered directly or selected with **Browse** in settings. The related
 checkbox chooses between saving directly to that configured folder and asking
 for a destination each time.
+
+WAV files and presets are staged in unique temporary files beside their destination.
+A failed or cancelled write does not replace an existing file. Automatic WAV
+names are reserved before writing so separate application instances cannot pick
+the same unused name. Manual Save As still opens if the configured output folder
+is unavailable, allowing another location to be chosen.
 
 ## Development
 
