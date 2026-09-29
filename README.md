@@ -131,6 +131,10 @@ the **Voice Clone** tab and asks for its name.
 In the settings dialog, Enter activates **Save** and Escape cancels. Escape
 closes immediately when nothing changed and asks before discarding unsaved
 changes otherwise.
+The **Appearance** tab previews the light and dark palettes immediately. The
+chosen theme also colours the app's own settings, preset, shortcut and progress
+windows. Native Windows file pickers and system message boxes continue to use
+the operating system's appearance.
 
 Manual setup:
 

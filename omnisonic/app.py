@@ -40,6 +40,7 @@ from .shortcuts import (
     normalize_shortcut,
     shortcut_parts,
 )
+from .theme import apply_theme, theme_for_window
 from .validation import preset_filename, safe_child_path, validate_filename_component
 
 torch = None
@@ -311,6 +312,7 @@ class StartupSplash:
             self.dialog.Bind(wx.EVT_CLOSE, self._confirm_cancel)
             layout.Add(self.cancel_button, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL, 5)
             panel.SetSizer(layout)
+            apply_theme(self.dialog, self.cfg.get("theme", "light"))
             self.dialog.Centre()
 
             timer = wx.Timer(self.dialog)
@@ -448,6 +450,7 @@ class OperationDialog:
             self.dialog.Bind(wx.EVT_CLOSE, self._confirm_cancel)
             layout.Add(self.cancel_button, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL, 5)
             panel.SetSizer(layout)
+            apply_theme(self.dialog, self.cfg.get("theme", "light"))
             self.dialog.Centre()
 
             timer = wx.Timer(self.dialog)
@@ -494,6 +497,7 @@ class DownloadDialog(wx.Dialog):
 
         self.SetSizer(vbox)
         self.Bind(wx.EVT_CLOSE, self.OnCancel)
+        apply_theme(self, theme_for_window(parent))
 
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.OnTimer, self.timer)
@@ -614,6 +618,7 @@ class ShortcutCaptureDialog(wx.Dialog):
         panel.SetSizer(layout)
 
         self.Bind(wx.EVT_CHAR_HOOK, self.OnKey)
+        apply_theme(self, theme_for_window(parent))
         self.CentreOnParent()
 
     def OnKey(self, event):
@@ -676,6 +681,7 @@ class PresetEditDialog(wx.Dialog):
         buttons.Add(cancel_button, 1)
         layout.Add(buttons, 0, wx.ALL | wx.EXPAND, 10)
         panel.SetSizer(layout)
+        apply_theme(self, theme_for_window(parent))
         self.CentreOnParent()
 
     def OnSourceChanged(self, event):
@@ -706,6 +712,7 @@ class SettingsDialog(wx.Dialog):
 
         self._initial_parent_ai_state = self._capture_parent_ai_state()
         self.InitUI()
+        apply_theme(self, self.cfg.get("theme", "light"))
         self._initial_settings_state = self._collect_settings_state()
         self.Centre()
 
@@ -751,6 +758,7 @@ class SettingsDialog(wx.Dialog):
         )
         self.cb_theme.SetName(self._("theme_lbl"))
         self.cb_theme.SetSelection(0 if self.cfg.get("theme", "light") == "light" else 1)
+        self.cb_theme.Bind(wx.EVT_COMBOBOX, self.OnThemeChange)
         vbox_app.Add(self.cb_theme, 0, wx.ALL | wx.EXPAND, 5)
 
         label = wx.StaticText(tab_app, label=self._("font_size_lbl"))
@@ -1020,6 +1028,9 @@ class SettingsDialog(wx.Dialog):
 
         panel.SetSizer(vbox_main)
         self.Bind(wx.EVT_CLOSE, self.OnClose)
+
+    def OnThemeChange(self, event):
+        apply_theme(self, "dark" if self.cb_theme.GetSelection() == 1 else "light")
 
     def BrowseForDirectory(self, target_ctrl):
         raw_path = target_ctrl.GetValue().strip()
@@ -1372,6 +1383,7 @@ class SettingsDialog(wx.Dialog):
                 else 0
             )
             self.cb_theme.SetSelection(0 if defaults["theme"] == "light" else 1)
+            self.OnThemeChange(None)
             self.spin_font.SetValue(defaults["font_size"])
             self.chk_hide_console.SetValue(defaults["hide_console"])
             self.cb_preset_disp.SetSelection(0)
@@ -1683,26 +1695,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         SetConsoleVisible(not self.cfg.get("hide_console", True))
 
     def ApplyTheme(self):
-        theme = self.cfg.get("theme", "light")
-        bg_color = wx.Colour(40, 40, 40) if theme == "dark" else wx.NullColour
-        fg_color = wx.Colour(220, 220, 220) if theme == "dark" else wx.NullColour
-
-        self.SetBackgroundColour(bg_color)
-        self.SetForegroundColour(fg_color)
-
-        def color_children(parent):
-            for child in parent.GetChildren():
-                if theme == "light" or not isinstance(
-                    child,
-                    (wx.TextCtrl, wx.ComboBox, wx.SpinCtrl, wx.SpinCtrlDouble, wx.Button, wx.Gauge),
-                ):
-                    child.SetBackgroundColour(bg_color)
-                    child.SetForegroundColour(fg_color)
-                color_children(child)
-
-        color_children(self)
-        self.Layout()
-        self.Refresh()
+        apply_theme(self, self.cfg.get("theme", "light"))
 
     def ApplyFontSize(self):
         size = self.cfg.get("font_size", 10)
