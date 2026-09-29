@@ -37,12 +37,15 @@ from omnisonic.validation import (
 
 
 class ConfigTests(unittest.TestCase):
-    def test_configuration_is_portable_and_auto_transcription_defaults_on(self):
+    def test_configuration_is_portable_and_auto_transcription_is_opt_in(self):
         self.assertEqual(APP_DATA_DIR, PROJECT_ROOT / "config")
         self.assertEqual(CONFIG_FILE, PROJECT_ROOT / "config/settings.json")
-        self.assertTrue(normalize_config({})["auto_transcribe_reference"])
+        self.assertFalse(normalize_config({})["auto_transcribe_reference"])
         self.assertFalse(
             normalize_config({"auto_transcribe_reference": False})["auto_transcribe_reference"]
+        )
+        self.assertTrue(
+            normalize_config({"auto_transcribe_reference": True})["auto_transcribe_reference"]
         )
 
     @unittest.skipUnless(os.name == "nt", "Windows known-folder API")

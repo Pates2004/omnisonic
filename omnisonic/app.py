@@ -31,6 +31,7 @@ from .i18n import load_locales, translate
 from .files import atomic_write, write_numbered_audio
 from .operations import OperationState, execute_worker
 from .model_lifecycle import ModelLifecycle
+from .startup import announce_window
 from .shortcuts import (
     SHORTCUT_DEFINITIONS,
     default_shortcut_bindings,
@@ -213,6 +214,7 @@ def LoadRuntimeDependencies():
     global torch, np, sf, sd, OmniVoice, OmniVoiceGenerationConfig
     global VoiceClonePrompt, load_waveform, accelerator_info, _ALL_LANGUAGES
 
+    logging.info("Loading OmniSonic runtime dependencies")
     import numpy as _np
     import sounddevice as _sd
     import soundfile as _sf
@@ -232,6 +234,11 @@ def LoadRuntimeDependencies():
     VoiceClonePrompt = _VCP
     load_waveform = _load_waveform
     accelerator_info = detect_accelerator(_torch)
+    logging.info(
+        "OmniSonic runtime ready: backend=%s, device=%s",
+        accelerator_info.backend,
+        accelerator_info.device,
+    )
     _ALL_LANGUAGES[:] = ["Auto"] + sorted(lang_display_name(n) for n in LANG_NAMES)
 
 
@@ -812,7 +819,7 @@ class SettingsDialog(wx.Dialog):
                 tab_sys, label=self._("auto_transcribe_reference")
             )
             self.chk_auto_transcribe.SetName(self._("auto_transcribe_reference"))
-            self.chk_auto_transcribe.SetValue(self.cfg.get("auto_transcribe_reference", True))
+            self.chk_auto_transcribe.SetValue(self.cfg.get("auto_transcribe_reference", False))
             vbox_sys.Add(self.chk_auto_transcribe, 0, wx.ALL | wx.EXPAND, 5)
 
             self.chk_unload_asr = wx.CheckBox(
@@ -2063,7 +2070,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             old_lang = self.cfg["language"]
             old_asr = self.cfg.get("asr_model_name")
             old_preload = self.cfg.get("preload_asr", False)
-            old_auto_transcribe = self.cfg.get("auto_transcribe_reference", True)
+            old_auto_transcribe = self.cfg.get("auto_transcribe_reference", False)
             old_generated_directory = self.cfg["generated_audio_directory"]
             try:
                 SaveBasicConfig(dlg.cfg)
@@ -2076,7 +2083,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 dlg.Destroy()
                 return
             self.cfg = dlg.cfg
-            if not old_auto_transcribe and self.cfg.get("auto_transcribe_reference", True):
+            if not old_auto_transcribe and self.cfg.get("auto_transcribe_reference", False):
                 self._auto_reference_pending = True
                 wx.CallAfter(self._MaybeAutoTranscribeReference)
             if old_generated_directory != self.cfg["generated_audio_directory"]:
@@ -2540,7 +2547,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     def _MaybeAutoTranscribeReference(self):
         if not self or self.IsBeingDeleted() or not self._auto_reference_pending:
             return
-        if not self.cfg.get("auto_transcribe_reference", True):
+        if not self.cfg.get("auto_transcribe_reference", False):
             self._auto_reference_pending = False
             return
         if self.clone_ref_text.GetValue().strip():
@@ -2718,7 +2725,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         asr_name = settings.get("asr_model_name")
         if asr_name:
             kwargs["asr_model_name"] = asr_name
+        logging.info("Loading OmniVoice model on %s with dtype=%s", device, dtype)
         model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", **kwargs)
+        logging.info("OmniVoice model loaded on %s", device)
         return model
 
     def _EnsureModelWorker(self, state, settings):
@@ -3623,6 +3632,7 @@ def main():
 
     if not cfg.get("first_run_done", False):
         dlg = SettingsDialog(None, is_first_run=True, current_cfg=cfg)
+        wx.CallAfter(announce_window)
         if dlg.ShowModal() == wx.ID_OK:
             cfg = dlg.cfg
             try:
@@ -3662,6 +3672,7 @@ def main():
 
     frame = OmniVoiceFrame(cfg, None)
     frame.Show(True)
+    announce_window()
     app.MainLoop()
     return 0
 

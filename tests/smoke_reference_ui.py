@@ -60,6 +60,9 @@ def main():
 
     app = wx.App(False)
     frame = TestFrame(dict(DEFAULT_CONFIG, show_progress=False), None)
+    assert not frame.cfg["auto_transcribe_reference"]
+    # The rest of this test explicitly exercises opt-in automatic transcription.
+    frame.cfg["auto_transcribe_reference"] = True
     model = Model()
     frame.model = model
 

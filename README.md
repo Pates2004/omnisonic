@@ -107,9 +107,16 @@ CPU is never silent. ROCm currently requires Python 3.12, so portable Python
 
 When **Hide launcher console** is enabled, normal launches are handed off to
 `pythonw.exe` so the console does not remain open with the application. The
-launcher keeps its console available during first-time installation and shows
-it again if startup or environment repair fails. Restart OmniSonic after
-changing this option so the launcher can select the correct Python executable.
+launcher waits for the actual Python process to open an application window;
+Windows virtual environments can first start a short-lived redirector process.
+The GUI itself is not started with a hidden window style. Import errors, model
+loading stages, and crashes are recorded in the ignored
+`Workspace/launcher-logs/desktop-startup.log`. If the desktop quits before
+opening or takes longer than three minutes, the launcher reports that path
+instead of silently accepting the failed start. A failed hidden launch also
+displays a standard Windows error dialog. The console stays available during
+first-time installation and reappears if environment repair fails. Restart
+OmniSonic after changing this option.
 
 The **System** settings tab shows the active backend, device, PyTorch/TorchAudio
 versions, CUDA/HIP/XPU state, Python, OS, and RAM. **Copy diagnostics** places a
@@ -232,13 +239,14 @@ scanned or migrated. The program folder must be writable.
 Launcher Python/backend preferences also live in `config/`; Power Switch does
 not transfer those hardware-specific preferences to another PC.
 
-**Automatically transcribe reference audio files** is enabled by default in
-Settings. Selecting/pasting a new reference path or finishing a microphone
-recording clears the previous transcript and starts Whisper once the model is
-ready. You can edit the result or disable this option and use **Transcribe**
-manually. Disabling it only disables proactive transcription on file selection;
+**Automatically transcribe reference audio files** is disabled by default in
+Settings. Enable it if selecting/pasting a new reference path or completing a
+microphone recording should start Whisper automatically. The previous transcript
+is cleared when the reference changes. You can instead use **Transcribe**
+manually. This checkbox only controls proactive transcription on file selection;
 the engine still needs a transcript when creating a voice prompt and obtains one
 if you generate/save a preset with an empty reference-text field.
+Existing saved checkbox choices are not changed by updates.
 **Preload ASR** is a separate option and is disabled by default. When disabled,
 Whisper loads on first use, not together with the synthesis model. Changing this
 setting takes effect after reloading the model; it does not by itself unload an
@@ -319,7 +327,12 @@ local OmniVoice checkpoint.
 `powershell -File tests/test_launcher.ps1` tests startup decisions without a GPU.
 Add `-Portable` to download the official portable Python and build the small ROCm
 source package that previously failed. This network regression also tests Python
-after environment activation/renaming; it leaves its diagnostic files in `trash/`.
+after environment activation/renaming and starts both system-venv and portable
+`pythonw.exe` in a controlled test. It leaves disposable diagnostics in `trash/`.
+For a full standalone ROCm installation on a supported AMD device, run
+`powershell -ExecutionPolicy Bypass -File tests/smoke_portable_amd.ps1`. It creates
+an isolated Python and GPU runtime in `Workspace/amd-portable-validation/`,
+without replacing the application's `venv/`, `config/`, or presets.
 
 `tests/test_operation_dispatch.py` covers queued GUI completions, cancellation
 dialogs and stale callbacks. `tests/test_demo_reference.py` covers web clone

@@ -50,6 +50,14 @@ def main():
         DEFAULT_CONFIG, generated_audio_directory=str(scratch / "audio"), show_progress=False
     )
     frame = TestFrame(cfg, None)
+    settings = desktop.SettingsDialog(frame, current_cfg=dict(DEFAULT_CONFIG))
+    try:
+        assert not settings.chk_auto_transcribe.GetValue()
+        assert settings.chk_auto_transcribe.GetName() == settings._("auto_transcribe_reference")
+        settings.chk_auto_transcribe.SetValue(True)
+        assert settings.chk_auto_transcribe.GetValue()
+    finally:
+        settings.Destroy()
     assert frame.batch_recursive.GetValue()
     assert frame.batch_preserve_structure.GetValue()
     frame.batch_preserve_structure.SetValue(False)

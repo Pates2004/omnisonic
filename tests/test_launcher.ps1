@@ -153,6 +153,38 @@ Assert-Test (-not (Test-ReadyMarkerData ([pscustomobject]@{}) "rocm" "h" "p" "v"
     Assert-Test ($ErrorActionPreference -eq 'Stop') 'Error policy restored after probe'
 }
 
+& {
+    $scratch = Join-Path $ProjectRoot ('trash\gui-launch-system-' + [Guid]::NewGuid().ToString('N'))
+    Assert-ProjectChildPath $scratch | Out-Null
+    $WorkDir = Join-Path $scratch '.launcher'
+    $profile = Get-BackendProfile $matrix 'cpu'
+    $systemPython = Find-SystemPython $profile
+    Assert-Test ([bool]$systemPython) 'A compatible system Python is available for GUI tests'
+    $python = New-SystemEnvironmentAt $systemPython (Join-Path $scratch 'venv') $profile
+    $previousMode = $env:OMNISONIC_STARTUP_TEST_MODE
+    try {
+        $env:OMNISONIC_STARTUP_TEST_MODE = 'ready'
+        Start-DesktopGui -Python $python -HideConsole $true `
+            -StartupModule 'tests.startup_stub' -StartupTimeoutSeconds 30 `
+            -LogDirectory (Join-Path $scratch 'logs')
+        Assert-Test (-not ((Get-Content -LiteralPath $script:LastStartupLog -Raw) -match 'TEST_GUI_PROCESS_EXITED_BEFORE_READY')) 'System Python startup succeeded'
+        $env:OMNISONIC_STARTUP_TEST_MODE = 'fail'
+        $failed = $false
+        try {
+            Start-DesktopGui -Python $python -HideConsole $true `
+                -StartupModule 'tests.startup_stub' -StartupTimeoutSeconds 30 `
+                -LogDirectory (Join-Path $scratch 'logs')
+        }
+        catch {
+            Assert-Test ($_.Exception.Message -match 'stopped before its window opened') 'Early pythonw exit is reported'
+            Assert-Test ($_.Exception.Message -match 'TEST_GUI_PROCESS_EXITED_BEFORE_READY') 'Startup log is included in the error'
+            $failed = $true
+        }
+        Assert-Test $failed 'Hidden Python startup failure is not silently accepted'
+    }
+    finally { $env:OMNISONIC_STARTUP_TEST_MODE = $previousMode }
+}
+
 if ($Portable) {
     # Network integration regression: no GPU or global HIP SDK is needed to
     # build the small ROCm Python package that failed under embedded Python.
@@ -177,5 +209,14 @@ if ($Portable) {
     $python = Get-EnvironmentPython "Portable" $activeRoot
     Assert-Test (Test-CompatiblePython $python $rocmProfile) "Renamed portable Python"
     Invoke-Checked $python @("-m", "pip", "--version") "Validating pip after activation"
+    $previousMode = $env:OMNISONIC_STARTUP_TEST_MODE
+    try {
+        $env:OMNISONIC_STARTUP_TEST_MODE = 'ready'
+        Start-DesktopGui -Python $python -HideConsole $true `
+            -StartupModule 'tests.startup_stub' -StartupTimeoutSeconds 30 `
+            -LogDirectory (Join-Path $scratch 'logs')
+        Assert-Test (-not ((Get-Content -LiteralPath $script:LastStartupLog -Raw) -match 'TEST_GUI_PROCESS_EXITED_BEFORE_READY')) 'Portable Python startup succeeded after activation'
+    }
+    finally { $env:OMNISONIC_STARTUP_TEST_MODE = $previousMode }
 }
 Write-Host "Launcher regression tests: OK"

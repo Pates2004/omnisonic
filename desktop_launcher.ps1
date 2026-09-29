@@ -30,6 +30,8 @@ $PythonArchiveUrl = "https://api.nuget.org/v3-flatcontainer/python/$PythonVersio
 $PythonArchiveSha256 = "0EB85C2DFCCCCF1B17352DE4C397F69194035B7D37149EACC16F1147D93DE3B8"
 $LauncherRevision = 8
 $script:LastRuntimeError = ""
+$script:LastStartupLog = ""
+$script:WasHiddenBackgroundLaunch = $false
 
 function Write-Step {
     param([string]$Message)
@@ -107,10 +109,12 @@ function Get-HideConsolePreference {
 
 function Test-HiddenLaunchReady {
     $settingsPath = Get-PreferenceSettingsPath
-    $hasRuntimeState = (Test-Path -LiteralPath $ModeFile) -and (
-        (Test-Path -LiteralPath (Join-Path $PortableDir ".omnisonic-ready")) -or
-        (Test-Path -LiteralPath (Join-Path $VenvDir ".omnisonic-ready"))
-    )
+    $savedMode = Get-SavedText $ModeFile
+    $runtimeRoot = if ($savedMode -eq "Portable") { $PortableDir }
+        elseif ($savedMode -eq "System") { $VenvDir }
+        else { $null }
+    $hasRuntimeState = $null -ne $runtimeRoot -and
+        (Test-Path -LiteralPath (Join-Path $runtimeRoot ".omnisonic-ready"))
     return (Get-HideConsolePreference) -and
         (Test-Path -LiteralPath $settingsPath) -and $hasRuntimeState
 }
@@ -120,6 +124,117 @@ function Get-GuiPython {
     $pythonw = Join-Path (Split-Path -Parent $Python) "pythonw.exe"
     if (Test-Path -LiteralPath $pythonw) { return $pythonw }
     return $null
+}
+
+function Show-StartupFailureDialog {
+    param([string]$Details)
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show(
+            "OmniSonic could not open its window. / Nie udalo sie otworzyc okna OmniSonic.`n`n$Details",
+            "OmniSonic startup / Uruchamianie OmniSonic",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    }
+    catch { Write-WarningMessage "Could not display the startup error dialog." }
+}
+
+function Start-DesktopGui {
+    param(
+        [string]$Python, [bool]$HideConsole,
+        [int]$StartupTimeoutSeconds = 180,
+        [string]$StartupModule = "omnisonic.startup",
+        [string]$LogDirectory = ""
+    )
+    $guiPython = if ($HideConsole) { Get-GuiPython $Python } else { $null }
+    if (-not $guiPython) {
+        if ($HideConsole) {
+            Write-WarningMessage "No pythonw.exe found. Keeping the console visible for startup errors."
+            Show-LauncherConsole
+        }
+        & $Python -E -s -m omnisonic.app
+        if ($LASTEXITCODE -ne 0) { throw "OmniSonic exited with code $LASTEXITCODE." }
+        return
+    }
+
+    if (-not $LogDirectory) { $LogDirectory = Join-Path $ProjectRoot 'Workspace\launcher-logs' }
+    $logs = Assert-ProjectChildPath $LogDirectory
+    New-Item -ItemType Directory -Path $logs -Force | Out-Null
+    $script:LastStartupLog = Join-Path $logs 'desktop-startup.log'
+    $startupId = [Guid]::NewGuid().ToString('N')
+    $readyPath = Assert-ProjectChildPath (Join-Path $WorkDir ('desktop-ready-' + $startupId + '.txt'))
+    $processPath = Assert-ProjectChildPath (Join-Path $WorkDir ('desktop-process-' + $startupId + '.txt'))
+    New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
+    $previousLog = $env:OMNISONIC_STARTUP_LOG
+    $previousReady = $env:OMNISONIC_STARTUP_READY
+    $previousProcess = $env:OMNISONIC_STARTUP_PROCESS
+    $env:OMNISONIC_STARTUP_LOG = $script:LastStartupLog
+    $env:OMNISONIC_STARTUP_READY = $readyPath
+    $env:OMNISONIC_STARTUP_PROCESS = $processPath
+    $removeReady = $true
+    try {
+        $process = Start-Process -FilePath $guiPython `
+            -ArgumentList @('-E', '-s', '-m', $StartupModule) `
+            -WorkingDirectory $ProjectRoot -PassThru
+        if (-not $process) { throw "Could not start pythonw.exe. Log: $($script:LastStartupLog)" }
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $nextUpdate = 15
+        $desktopProcessId = $null
+        while ($timer.Elapsed.TotalSeconds -lt $StartupTimeoutSeconds) {
+            if ((-not $desktopProcessId) -and (Test-Path -LiteralPath $processPath)) {
+                $desktopProcessId = (Get-Content -LiteralPath $processPath -Raw).Trim()
+                if ($desktopProcessId -notmatch '^[1-9][0-9]*$') {
+                    throw "The desktop returned an invalid process ID. Log: $($script:LastStartupLog)"
+                }
+            }
+            $desktopProcess = if ($desktopProcessId) {
+                Get-Process -Id ([int]$desktopProcessId) -ErrorAction SilentlyContinue
+            } else { $null }
+            if (Test-Path -LiteralPath $readyPath) {
+                $readyProcessId = (Get-Content -LiteralPath $readyPath -Raw -ErrorAction Stop).Trim()
+                if ($desktopProcessId -and $readyProcessId -eq $desktopProcessId -and $desktopProcess) {
+                    Start-Sleep -Milliseconds 750
+                    if (-not (Get-Process -Id ([int]$desktopProcessId) -ErrorAction SilentlyContinue)) {
+                        throw "OmniSonic stopped immediately after showing its window. Log: $($script:LastStartupLog)"
+                    }
+                    Write-Step "OmniSonic opened successfully. Startup log: $($script:LastStartupLog)"
+                    return
+                }
+            }
+            if ($desktopProcessId -and -not $desktopProcess) {
+                $recentLog = if (Test-Path -LiteralPath $script:LastStartupLog) {
+                    (Get-Content -LiteralPath $script:LastStartupLog -Tail 12) -join [Environment]::NewLine
+                } else { 'No startup log was written.' }
+                throw "OmniSonic stopped before its window opened.`nLog: $($script:LastStartupLog)`n$recentLog"
+            }
+            $process.Refresh()
+            if ($process.HasExited -and ($process.ExitCode -ne 0 -or $timer.Elapsed.TotalSeconds -ge 30 -and -not $desktopProcessId)) {
+                $recentLog = if (Test-Path -LiteralPath $script:LastStartupLog) {
+                    (Get-Content -LiteralPath $script:LastStartupLog -Tail 12) -join [Environment]::NewLine
+                } else { 'No startup log was written.' }
+                throw "The Python launcher stopped (code $($process.ExitCode)) without opening OmniSonic.`nLog: $($script:LastStartupLog)`n$recentLog"
+            }
+            if ($timer.Elapsed.TotalSeconds -ge $nextUpdate) {
+                Write-Step "Still loading OmniSonic ($nextUpdate seconds). Log: $($script:LastStartupLog)"
+                $nextUpdate += 15
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        $removeReady = $false
+        throw "OmniSonic has not opened a window after $StartupTimeoutSeconds seconds. Desktop process $desktopProcessId may still be running; close it before retrying. Log: $($script:LastStartupLog)"
+    }
+    finally {
+        $env:OMNISONIC_STARTUP_LOG = $previousLog
+        $env:OMNISONIC_STARTUP_READY = $previousReady
+        $env:OMNISONIC_STARTUP_PROCESS = $previousProcess
+        if ($removeReady -and (Test-Path -LiteralPath $readyPath)) {
+            Remove-Item -LiteralPath $readyPath -Force
+        }
+        if ($removeReady -and (Test-Path -LiteralPath $processPath)) {
+            Remove-Item -LiteralPath $processPath -Force
+        }
+    }
 }
 
 function Assert-ProjectChildPath {
@@ -496,13 +611,17 @@ function Install-PortablePythonAt {
     # isolated build environments (including the ROCm source distribution).
     $unpack = Join-Path $WorkDir ("python-unpack-" + [Guid]::NewGuid().ToString("N"))
     Assert-ProjectChildPath $unpack | Out-Null
-    Expand-Archive -LiteralPath $archive -DestinationPath $unpack
-    $toolsRoot = Join-Path $unpack "tools"
-    if (-not (Test-Path -LiteralPath (Join-Path $toolsRoot "python.exe"))) {
-        throw "The CPython package does not contain tools/python.exe."
+    try {
+        Expand-Archive -LiteralPath $archive -DestinationPath $unpack
+        $toolsRoot = Join-Path $unpack "tools"
+        if (-not (Test-Path -LiteralPath (Join-Path $toolsRoot "python.exe"))) {
+            throw "The CPython package does not contain tools/python.exe."
+        }
+        Move-Item -LiteralPath $toolsRoot -Destination $TargetRoot
     }
-    Move-Item -LiteralPath $toolsRoot -Destination $TargetRoot
-    Remove-LauncherDirectory $unpack
+    finally {
+        Remove-LauncherDirectory $unpack
+    }
     $python = Get-EnvironmentPython "Portable" $TargetRoot
     if (-not (Test-CompatiblePython $python)) { throw "Portable Python is not compatible." }
     Invoke-Checked -FilePath $python -Arguments @(
@@ -1011,7 +1130,8 @@ function Invoke-Main {
         return
     }
     $hideConsole = Get-HideConsolePreference
-    if (Test-HiddenLaunchReady) { Hide-LauncherConsole }
+    $script:WasHiddenBackgroundLaunch = [bool](Test-HiddenLaunchReady)
+    if ($script:WasHiddenBackgroundLaunch) { Hide-LauncherConsole }
     if (-not (Test-Runtime $python $selectedBackend $profile $hardwareFingerprint $activeRoot -Quick:(-not $InstallOnly))) {
         Show-LauncherConsole
         if ($script:LastRuntimeError) { Write-Step "Runtime repair required: $script:LastRuntimeError" }
@@ -1039,20 +1159,7 @@ function Invoke-Main {
     Write-Step "Starting OmniSonic with $($profile.display_name)"
     $env:OMNISONIC_APP_DIR = $ProjectRoot
     $env:OMNISONIC_ACTIVE_BACKEND = $selectedBackend
-    if ($hideConsole) {
-        $guiPython = Get-GuiPython $python
-        if ($guiPython) {
-            Start-Process -FilePath $guiPython -ArgumentList @("-E", "-s", "-m", "omnisonic.app") `
-                -WorkingDirectory $ProjectRoot -WindowStyle Hidden | Out-Null
-            return
-        }
-        Hide-LauncherConsole
-    }
-    & $python -E -s -m omnisonic.app
-    if ($LASTEXITCODE -ne 0) {
-        Show-LauncherConsole
-        throw "OmniSonic exited with code $LASTEXITCODE."
-    }
+    Start-DesktopGui -Python $python -HideConsole $hideConsole
 }
 
 if ($MyInvocation.InvocationName -eq '.') { return }
@@ -1067,5 +1174,8 @@ catch {
     Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "Installation or startup failed. Run start_desktop.bat again to repair it." -ForegroundColor Red
     Write-Host "Instalacja lub uruchomienie nie powiodlo sie. Uruchom start_desktop.bat ponownie, aby naprawic srodowisko." -ForegroundColor Red
+    if ($script:WasHiddenBackgroundLaunch) {
+        Show-StartupFailureDialog $_.Exception.Message
+    }
     exit 1
 }
