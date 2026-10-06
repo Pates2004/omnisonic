@@ -16,6 +16,21 @@ function Assert-Rejected {
 }
 
 Assert-Test ($SwitchData -eq (Join-Path $SwitchRoot 'config')) 'Power Switch uses program/config'
+& {
+    function Get-CimInstance {
+        return [pscustomobject]@{ Name = 'pythonw.exe'; CommandLine = $commandLine }
+    }
+    foreach ($commandLine in @(
+        'pythonw.exe -E -s -m omnisonic.startup',
+        'python.exe -E -s -m omnisonic.app',
+        'python.exe "C:\OmniSonic\wx_app.py"'
+    )) {
+        Assert-Rejected { Assert-SwitchAppClosed } 'Close OmniSonic'
+    }
+    foreach ($commandLine in @('python.exe -m unrelated.app', 'python.exe -m omnisonic.application', $null)) {
+        Assert-SwitchAppClosed
+    }
+}
 $fixture = Join-Path $SwitchRoot ('trash\power-switch-tests-' + [Guid]::NewGuid().ToString('N'))
 $SwitchRoot = Join-Path $fixture 'old-pc'
 $SwitchData = Join-Path $SwitchRoot 'config'
@@ -88,6 +103,60 @@ $before = (Get-FileHash -LiteralPath $targetSettings).Hash
     Assert-Rejected { Import-SwitchProfile $export } 'previous files restored'
 }
 Assert-Test ((Get-FileHash -LiteralPath $targetSettings).Hash -eq $before) 'Rollback restored settings'
+
+& {
+    $SwitchRoot = Join-Path $fixture 'partial-rollback-pc'
+    $SwitchData = Join-Path $SwitchRoot 'config'
+    $SwitchBackups = Join-Path $fixture 'partial-rollback-backups'
+    $profile = Join-Path $fixture 'partial-rollback-profile'
+    $files = @(
+        foreach ($name in @('a', 'b', 'c')) {
+            $relative = "presets/$name.pt"
+            $source = Join-SwitchChild $profile $relative
+            Write-SwitchJson $source @{ value = "new-$name" }
+            Write-SwitchJson (Get-SwitchDestination $relative) @{ value = "old-$name" }
+            @{ path = $relative; sha256 = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash }
+        }
+    )
+    Write-SwitchJson (Join-Path $profile 'manifest.json') @{
+        format = 'omnisonic-power-switch'; version = 1; files = $files
+    }
+    $copyOriginal = (Get-Command Copy-SwitchFile).ScriptBlock
+    $script:partialRollbackBackup = $null
+    function Copy-SwitchFile {
+        param([string]$Source, [string]$Destination)
+        if ($Source -eq (Join-SwitchChild $profile 'presets/c.pt')) { throw 'Simulated original import failure' }
+        if ($Source.StartsWith($SwitchBackups + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            $script:partialRollbackBackup = Split-Path -Parent (Split-Path -Parent $Source)
+            if ((Split-Path -Leaf $Source) -in @('a.pt', 'c.pt')) {
+                throw "Simulated rollback failure for $(Split-Path -Leaf $Source)"
+            }
+        }
+        & $copyOriginal $Source $Destination
+    }
+    $failureMessage = $null
+    try { Import-SwitchProfile $profile | Out-Null }
+    catch { $failureMessage = $_.Exception.Message }
+    Assert-Test ($failureMessage -match 'some files could not be restored') 'Partial rollback does not claim complete restoration'
+    Assert-Test ($failureMessage -match 'Simulated original import failure') 'Partial rollback retains the original import error'
+    Assert-Test ($failureMessage -match 'presets/a.pt' -and $failureMessage -match 'presets/c.pt') 'All rollback failures are listed'
+    Assert-Test ([bool]$script:partialRollbackBackup) 'Exact recovery backup was captured'
+    Assert-Test ($failureMessage -match [Regex]::Escape($script:partialRollbackBackup)) 'Partial rollback identifies the exact backup location'
+    $recovered = Read-SwitchSettings (Get-SwitchDestination 'presets/b.pt')
+    Assert-Test ($recovered.value -eq 'old-b') 'A recoverable later entry is restored after an earlier rollback error'
+    $original = Read-SwitchSettings (Join-SwitchChild $script:partialRollbackBackup 'presets/a.pt')
+    Assert-Test ($original.value -eq 'old-a') 'The failed restoration backup remains intact'
+}
+
+& {
+    function powershell.exe { $global:LASTEXITCODE = 9 }
+    $failureMessage = $null
+    try { Invoke-SwitchBackend 'CPU' }
+    catch { $failureMessage = $_.Exception.Message }
+    Assert-Test ($failureMessage -match 'failed with code 9') 'Backend switch retains the native failure status'
+    Assert-Test ($failureMessage -match 'launcher diagnostics') 'Backend switch refers to the actual recovery diagnostics'
+    Assert-Test ($failureMessage -notmatch 'retained|was restored') 'Backend switch does not invent successful recovery'
+}
 
 # Junctions must not escape the profile boundaries, even if the target exists.
 $linkTarget = Join-Path $fixture 'junction-target'

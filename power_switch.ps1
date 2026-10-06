@@ -232,15 +232,24 @@ function Import-SwitchProfile {
             } else { Copy-SwitchFile $entry.Source $entry.Destination }
         }
     } catch {
-        $failure = $_
+        $failure = $_.Exception.Message
+        $rollbackErrors = New-Object 'System.Collections.Generic.List[string]'
         foreach ($entry in $written) {
-            $original = Join-SwitchChild $backup $entry.Relative
-            if (Test-Path -LiteralPath $original) { Copy-SwitchFile $original $entry.Destination }
-            elseif (Test-Path -LiteralPath $entry.Destination) {
-                # Only a new file created by this import can be removed here.
-                Assert-SwitchPath $entry.Destination | Out-Null
-                Remove-Item -LiteralPath $entry.Destination
+            try {
+                $original = Join-SwitchChild $backup $entry.Relative
+                if (Test-Path -LiteralPath $original) { Copy-SwitchFile $original $entry.Destination }
+                elseif (Test-Path -LiteralPath $entry.Destination) {
+                    # Only a new file created by this import can be removed here.
+                    Assert-SwitchPath $entry.Destination | Out-Null
+                    Remove-Item -LiteralPath $entry.Destination
+                }
             }
+            catch {
+                $rollbackErrors.Add("$($entry.Relative) [$($entry.Destination)]: $($_.Exception.Message)")
+            }
+        }
+        if ($rollbackErrors.Count -gt 0) {
+            throw "Import failed; some files could not be restored / Import nie powiodl sie; nie wszystkie pliki przywrocono. Backup / Kopia: $backup. Import error / Blad importu: $failure. Rollback errors / Bledy przywracania:`n$($rollbackErrors -join [Environment]::NewLine)"
         }
         throw "Import failed; previous files restored. Backup: $backup. $failure"
     }
@@ -252,7 +261,7 @@ function Import-SwitchProfile {
 function Assert-SwitchAppClosed {
     $processes = Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'"
     foreach ($process in $processes) {
-        if ($process.CommandLine -match 'omnisonic\.app|wx_app\.py') {
+        if ($process.CommandLine -match '\bomnisonic\.(?:app|startup)\b|(?:^|[\\/\s"])wx_app\.py(?:["\s]|$)') {
             throw 'Close OmniSonic before using Power Switch / Najpierw zamknij OmniSonic.'
         }
     }
@@ -264,7 +273,9 @@ function Invoke-SwitchBackend {
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (
         Join-Path $SwitchRoot 'desktop_launcher.ps1'
     ) -Backend $SelectedBackend -InstallOnly
-    if ($LASTEXITCODE -ne 0) { throw "Backend switch failed with code $LASTEXITCODE. Previous runtime was retained." }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Backend switch failed with code $LASTEXITCODE. Check the launcher diagnostics above for the recovery state. / Zmiana backendu nie powiodla sie. Sprawdz powyzsza diagnostyke launchera i stan przywracania."
+    }
 }
 
 function Invoke-PowerSwitch {

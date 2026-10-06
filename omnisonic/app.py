@@ -3,6 +3,7 @@ import logging
 import os
 import threading
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import wx
@@ -41,7 +42,13 @@ from .shortcuts import (
     shortcut_parts,
 )
 from .theme import apply_theme, theme_for_window
-from .validation import preset_filename, safe_child_path, validate_filename_component
+from .validation import (
+    operation_error_message,
+    preset_filename,
+    safe_child_path,
+    validate_filename_component,
+    validation_error_message,
+)
 
 torch = None
 np = None
@@ -56,10 +63,18 @@ accelerator_info = None
 _ALL_LANGUAGES = ["Auto"]
 
 _AUDIO_FILE_WILDCARD = (
-    "Audio files (*.wav;*.flac;*.ogg;*.oga;*.opus;*.mp3;*.aiff;*.aif;*.au;*.caf)|"
+    "{audio_files} (*.wav;*.flac;*.ogg;*.oga;*.opus;*.mp3;*.aiff;*.aif;*.au;*.caf)|"
     "*.wav;*.flac;*.ogg;*.oga;*.opus;*.mp3;*.aiff;*.aif;*.au;*.caf|"
-    "All files (*.*)|*.*"
+    "{all_files} (*.*)|*.*"
 )
+
+
+def _audio_file_wildcard(translate_func):
+    return _AUDIO_FILE_WILDCARD.format(
+        audio_files=translate_func("audio_files_filter"),
+        all_files=translate_func("all_files_filter"),
+    )
+
 
 _CATEGORIES = {
     "Gender": ["None", "Male", "Female"],
@@ -188,7 +203,7 @@ def _wx_accelerator(shortcut, command_id):
 
 def _shortcut_from_key_event(event):
     key_code = event.GetKeyCode()
-    if event.ControlDown() and 1 <= key_code <= 26:
+    if event.ControlDown() and 1 <= key_code <= 26 and key_code not in _SHORTCUT_WX_KEYS_REVERSED:
         key_code += ord("A") - 1
 
     if key_code in _SHORTCUT_WX_KEYS_REVERSED:
@@ -251,11 +266,20 @@ class StartupSplash:
         self.finished = False
         self.cancel_requested = False
         self.error = None
+        self.dialog = None
+        self._confirming_cancel = False
+
+    def _finish_custom_dialog(self):
+        if self._confirming_cancel or not self.finished:
+            return
+        if self.dialog and self.dialog.IsModal():
+            result = wx.ID_CANCEL if self.cancel_requested or self.error else wx.ID_OK
+            self.dialog.EndModal(result)
 
     def _confirm_cancel(self, event=None):
         if isinstance(event, wx.CloseEvent):
             event.Veto()
-        if self.cancel_requested:
+        if self.cancel_requested or self._confirming_cancel or self.finished:
             return
         dialog = wx.MessageDialog(
             self.dialog,
@@ -263,14 +287,19 @@ class StartupSplash:
             self._("warning_title"),
             wx.YES_NO | wx.ICON_QUESTION,
         )
-        confirmed = dialog.ShowModal() == wx.ID_YES
-        dialog.Destroy()
-        if confirmed:
-            self.cancel_requested = True
-            if hasattr(self, "cancel_button"):
-                self.cancel_button.Disable()
-            if hasattr(self, "label"):
-                self.label.SetLabel(self._("cancel_pending"))
+        self._confirming_cancel = True
+        try:
+            if dialog.ShowModal() == wx.ID_YES:
+                self.cancel_requested = True
+                if hasattr(self, "cancel_button"):
+                    self.cancel_button.Disable()
+                if hasattr(self, "label"):
+                    self.label.SetLabel(self._("cancel_pending"))
+        finally:
+            dialog.Destroy()
+            self._confirming_cancel = False
+            if not self.cfg.get("use_native_dialogs", False):
+                self._finish_custom_dialog()
 
     def ShowModal(self):
         title = self._("startup_title")
@@ -349,8 +378,7 @@ class StartupSplash:
         finally:
             self.finished = True
             if not self.cfg.get("use_native_dialogs", False):
-                result = wx.ID_CANCEL if self.cancel_requested or self.error else wx.ID_OK
-                wx.CallAfter(self.dialog.EndModal, result)
+                wx.CallAfter(self._finish_custom_dialog)
 
 
 class OperationDialog:
@@ -483,6 +511,7 @@ class DownloadDialog(wx.Dialog):
         self._ = lang_func
         self.repo_id = repo_id
         self.state = OperationState(name=f"download:{repo_id}")
+        self._confirming_cancel = False
 
         vbox = wx.BoxSizer(wx.VERTICAL)
         self.lbl = wx.StaticText(self, label=label)
@@ -528,21 +557,30 @@ class DownloadDialog(wx.Dialog):
             self.gauge.SetValue((self.gauge.GetValue() + 5) % 101)
         else:
             self.gauge.Pulse()
-        if self.state.finished:
+        self._finish_modal()
+
+    def _finish_modal(self):
+        if self.state.finished and not self._confirming_cancel and self.IsModal():
             self.timer.Stop()
             self.EndModal(wx.ID_OK if self.state.succeeded else wx.ID_CANCEL)
 
     def OnCancel(self, event):
         if isinstance(event, wx.CloseEvent):
             event.Veto()
-        if self.state.cancel_flag:
+        if self.state.cancel_flag or self.state.finished or self._confirming_cancel:
             return
         msg = self._("cancel_dl_prompt")
         title = self._("cancel_title")
-        if wx.MessageBox(msg, title, wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
-            self.state.request_cancel()
-            self.btn_cancel.Disable()
-            self.lbl.SetLabel(self._("cancel_pending"))
+        self._confirming_cancel = True
+        try:
+            confirmed = wx.MessageBox(msg, title, wx.YES_NO | wx.ICON_QUESTION, parent=self)
+            if confirmed == wx.YES and not self.state.finished:
+                self.state.request_cancel()
+                self.btn_cancel.Disable()
+                self.lbl.SetLabel(self._("cancel_pending"))
+        finally:
+            self._confirming_cancel = False
+            self._finish_modal()
 
     def _dl_worker(self, state):
         from huggingface_hub import snapshot_download
@@ -582,22 +620,17 @@ class AccessibleFloatCtrl(wx.TextCtrl):
             event.Skip()
 
     def Increment(self, amount):
-        try:
-            val = float(super(AccessibleFloatCtrl, self).GetValue())
-            val += amount
-            if val < self.min_val:
-                val = self.min_val
-            if val > self.max_val:
-                val = self.max_val
-            self.SetValue(str(round(val, 2)))
-        except ValueError:
-            pass
+        value = Decimal(str(self.GetValue())) + Decimal(str(amount))
+        value = max(Decimal(str(self.min_val)), min(Decimal(str(self.max_val)), value))
+        self.SetValue(format(value, "f"))
 
     def GetValue(self):
         try:
-            value = float(super(AccessibleFloatCtrl, self).GetValue())
-            return max(self.min_val, min(self.max_val, value))
-        except ValueError:
+            value = Decimal(super(AccessibleFloatCtrl, self).GetValue())
+            if not value.is_finite():
+                return self.min_val
+            return float(max(Decimal(str(self.min_val)), min(Decimal(str(self.max_val)), value)))
+        except InvalidOperation:
             return self.min_val
 
 
@@ -695,7 +728,7 @@ class PresetEditDialog(wx.Dialog):
         with wx.FileDialog(
             self,
             self._("browse"),
-            wildcard=_AUDIO_FILE_WILDCARD,
+            wildcard=_audio_file_wildcard(self._),
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         ) as dialog:
             if dialog.ShowModal() == wx.ID_OK:
@@ -1502,7 +1535,9 @@ class SettingsDialog(wx.Dialog):
                 )
             except (OSError, ValueError) as exc:
                 wx.MessageBox(
-                    self._("invalid_settings_value").format(error=str(exc)),
+                    self._("invalid_settings_value").format(
+                        error=validation_error_message(exc, self._)
+                    ),
                     self._("error_title"),
                     wx.OK | wx.ICON_ERROR,
                 )
@@ -1633,9 +1668,15 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.audio_data = None
         self.sample_rate = 24000
         self.current_op = None
+        self.rec_stream = None
+        self.rec_data = []
+        self.rec_fs = None
         self._reference_revision = 0
         self._auto_reference_pending = False
         self._reference_timer = None
+        self._closing = False
+        self._confirming_close = False
+        self._autoload_timer = None
 
         ensure_user_directories()
         self.ApplyConsoleState()
@@ -1649,7 +1690,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
         self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
 
-        wx.CallLater(500, self.AutoLoadModel)
+        self._autoload_timer = wx.CallLater(500, self.AutoLoadModel)
 
     def _(self, key):
         return translate(LOCALE, self.cfg.get("language", "en"), key)
@@ -1723,6 +1764,11 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
         for definition in SHORTCUT_DEFINITIONS:
             item, menu_label_key = self.shortcut_menu_items[definition.key]
+            if definition.key == "record":
+                if getattr(self, "rec_stream", None) is not None:
+                    menu_label_key = "stop_rec"
+                elif getattr(self, "rec_data", ()):
+                    menu_label_key = "record_retry_save"
             try:
                 shortcut = normalize_shortcut(bindings.get(definition.key, definition.default))
             except ValueError:
@@ -1945,6 +1991,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 self.Log(self._("cancel_pending"))
 
     def _set_operation_controls_enabled(self, enabled):
+        recording_busy = getattr(self, "rec_stream", None) is not None or bool(
+            getattr(self, "rec_data", ())
+        )
+        operations_enabled = enabled and not recording_busy
         for name in (
             "btn_gen_clone",
             "btn_gen_design",
@@ -1967,9 +2017,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         ):
             control = getattr(self, name, None)
             if control:
-                control.Enable(enabled)
+                control.Enable(operations_enabled)
         has_presets = bool(
-            enabled and hasattr(self, "list_presets") and self.list_presets.GetCount()
+            operations_enabled and hasattr(self, "list_presets") and self.list_presets.GetCount()
         )
         for name in (
             "btn_edit_preset",
@@ -1980,21 +2030,24 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             if control:
                 control.Enable(has_presets)
         if hasattr(self, "item_settings"):
-            self.item_settings.Enable(enabled)
+            self.item_settings.Enable(operations_enabled)
         if hasattr(self, "item_generate"):
-            self.item_generate.Enable(enabled)
+            self.item_generate.Enable(operations_enabled)
         if hasattr(self, "item_save_preset"):
-            self.item_save_preset.Enable(enabled)
+            self.item_save_preset.Enable(operations_enabled)
+        for name in ("btn_rec_ref", "item_record"):
+            control = getattr(self, name, None)
+            if control:
+                control.Enable(enabled)
 
     def _complete_operation(self, state, success_callback):
-        was_released = self._models.needs_collection and self.model is None
-        self._models.collect_if_needed()
+        was_released = self._models.collect_if_needed() and self.model is None
         self.btn_toggle_model.SetLabel(self._("unload_model" if self.model else "load_model"))
         self.sample_rate = self._models.sampling_rate
         if was_released:
             self.Log(self._("model_unloaded"), success=True)
         if state.error is not None:
-            message = self._("msg_error") + str(state.error)
+            message = self._("msg_error") + operation_error_message(state.error, self._)
             self.Log(message)
             wx.MessageBox(message, self._("error_title"), wx.OK | wx.ICON_ERROR)
         elif state.cancel_flag:
@@ -2004,7 +2057,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 success_callback(state.result)
             except Exception as exc:
                 logging.exception("Operation success callback failed")
-                message = self._("msg_error") + str(exc)
+                message = self._("msg_error") + operation_error_message(exc, self._)
                 self.Log(message)
                 wx.MessageBox(message, self._("error_title"), wx.OK | wx.ICON_ERROR)
 
@@ -2016,6 +2069,14 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if self.current_op is not None:
             wx.MessageBox(
                 self._("operation_busy"),
+                self._("warning_title"),
+                wx.OK | wx.ICON_WARNING,
+            )
+            return None
+
+        if getattr(self, "rec_stream", None) is not None or getattr(self, "rec_data", ()):
+            wx.MessageBox(
+                self._("record_operation_busy"),
                 self._("warning_title"),
                 wx.OK | wx.ICON_WARNING,
             )
@@ -2065,9 +2126,11 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             old_preload = self.cfg.get("preload_asr", False)
             old_auto_transcribe = self.cfg.get("auto_transcribe_reference", False)
             old_generated_directory = self.cfg["generated_audio_directory"]
+            old_preset_display = self.cfg.get("preset_display_mode", "name")
             try:
                 SaveBasicConfig(dlg.cfg)
             except OSError as exc:
+                dlg._restore_parent_ai_state()
                 wx.MessageBox(
                     self._("config_save_failed").format(error=str(exc)),
                     self._("error_title"),
@@ -2076,6 +2139,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 dlg.Destroy()
                 return
             self.cfg = dlg.cfg
+            if old_preset_display != self.cfg.get("preset_display_mode", "name"):
+                self.RefreshPresets()
             if not old_auto_transcribe and self.cfg.get("auto_transcribe_reference", False):
                 self._auto_reference_pending = True
                 wx.CallAfter(self._MaybeAutoTranscribeReference)
@@ -2096,28 +2161,50 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         dlg.Destroy()
 
     def OnCloseWindow(self, event):
+        if getattr(self, "_closing", False) or getattr(self, "_confirming_close", False):
+            event.Veto()
+            return
         state = self.current_op
         if state is not None:
             dlg = wx.MessageDialog(
                 self, self._("close_busy"), self._("warning_title"), wx.YES_NO | wx.ICON_QUESTION
             )
-            confirmed = dlg.ShowModal() == wx.ID_YES
-            dlg.Destroy()
+            self._confirming_close = True
+            try:
+                confirmed = dlg.ShowModal() == wx.ID_YES
+            finally:
+                dlg.Destroy()
+                self._confirming_close = False
             if confirmed and self.current_op is state and not state.finished:
                 state.request_cancel()
                 self.Log(self._("cancel_pending"))
             event.Veto()
             return
 
-        if self.cfg.get("warn_exit", True):
+        recording_busy = getattr(self, "rec_stream", None) is not None or bool(
+            getattr(self, "rec_data", ())
+        )
+        if recording_busy or self.cfg.get("warn_exit", True):
             dlg = wx.MessageDialog(
-                self, self._("close_warn"), self._("warning_title"), wx.YES_NO | wx.ICON_QUESTION
+                self,
+                self._("record_discard_close" if recording_busy else "close_warn"),
+                self._("warning_title"),
+                wx.YES_NO | wx.ICON_QUESTION,
             )
-            confirmed = dlg.ShowModal() == wx.ID_YES
-            dlg.Destroy()
+            self._confirming_close = True
+            try:
+                confirmed = dlg.ShowModal() == wx.ID_YES
+            finally:
+                dlg.Destroy()
+                self._confirming_close = False
             if not confirmed:
                 event.Veto()
                 return
+
+        # Modal confirmations dispatch queued events, including worker startup.
+        if self.current_op is not None:
+            event.Veto()
+            return
 
         if self.cfg.get("remember_ai_settings", True):
             if hasattr(self, "spin_steps"):
@@ -2153,6 +2240,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             event.Veto()
             return
 
+        self._closing = True
+        if self._autoload_timer is not None:
+            self._autoload_timer.Stop()
+            self._autoload_timer = None
         if self.cfg.get("clean_temp", True):
             if os.path.exists(RECORDED_AUDIO_FILE):
                 try:
@@ -2164,6 +2255,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             self._CloseRecording()
         except Exception as exc:
             logging.warning("Could not close recording stream: %s", exc)
+        self.rec_data = []
 
         self.OnStopAudio(None)
         if self._reference_timer is not None:
@@ -2373,7 +2465,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         label = wx.StaticText(tab, label=lbl_cfg)
         vbox.Add(label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
         def_cfg = self.cfg.get("ai_cfg", 2.0) if self.cfg.get("remember_ai_settings", True) else 2.0
-        self.spin_cfg = AccessibleFloatCtrl(tab, value=def_cfg, min_val=0.1, max_val=10.0, inc=0.1)
+        self.spin_cfg = AccessibleFloatCtrl(tab, value=def_cfg, min_val=0.0, max_val=10.0, inc=0.1)
         self.spin_cfg.SetName(lbl_cfg)
         self.spin_cfg.SetToolTip(lbl_cfg)
 
@@ -2499,11 +2591,15 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         lbl_dur = self._("duration_lbl")
         self.chk_duration = wx.CheckBox(tab, label=lbl_dur)
         self.chk_duration.SetName(lbl_dur)
-        self.chk_duration.SetValue(self.cfg.get("use_duration", False))
+        self.chk_duration.SetValue(self.cfg.get("use_duration", False) if remember else False)
         vbox.Add(self.chk_duration, 0, wx.ALL, 5)
 
         self.spin_duration = wx.SpinCtrlDouble(
-            tab, value=str(self.cfg.get("duration_val", 5.0)), min=0.1, max=100.0, inc=0.5
+            tab,
+            value=str(self.cfg.get("duration_val", 5.0) if remember else 5.0),
+            min=0.1,
+            max=100.0,
+            inc=0.5,
         )
         self.spin_duration.SetName(lbl_dur)
         self.spin_duration.SetToolTip(lbl_dur)
@@ -2518,7 +2614,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         with wx.FileDialog(
             self,
             self._("browse"),
-            wildcard=_AUDIO_FILE_WILDCARD,
+            wildcard=_audio_file_wildcard(self._),
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         ) as fd:
             if fd.ShowModal() != wx.ID_CANCEL:
@@ -2548,7 +2644,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             return
         if not self._CanUseModel() or self.current_op is not None:
             return  # Retried once the model/current operation has finished.
-        if getattr(self, "rec_stream", None) is not None:
+        if getattr(self, "rec_stream", None) is not None or getattr(self, "rec_data", ()):
             self._reference_timer = wx.CallLater(600, self._MaybeAutoTranscribeReference)
             return
         active = wx.GetActiveWindow()
@@ -2587,7 +2683,11 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 return  # The user edited the transcript while the worker was running.
             self.clone_ref_text.SetValue(text)
             self.Log(self._("transcribe_complete"), success=True)
-            if not automatic:
+            if (
+                not automatic
+                and self.clone_ref_text.IsShownOnScreen()
+                and self.clone_ref_text.IsEnabled()
+            ):
                 self.clone_ref_text.SetFocus()
 
         self.RunModelOperation(
@@ -2610,6 +2710,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         return text
 
     def RefreshPresets(self):
+        previous_active = None
+        selection = self.combo_presets.GetSelection()
+        if selection != wx.NOT_FOUND:
+            previous_active = self.combo_presets.GetClientData(selection)
         previous_managed = None
         if hasattr(self, "list_presets"):
             selection = self.list_presets.GetSelection()
@@ -2621,22 +2725,27 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
         if PRESETS_DIR.exists():
             pts = []
-            for candidate in PRESETS_DIR.iterdir():
+            try:
+                candidates = list(PRESETS_DIR.iterdir())
+            except OSError as exc:
+                logging.warning("Could not list presets in %s: %s", PRESETS_DIR, exc)
+                candidates = []
+            for candidate in candidates:
                 if candidate.suffix.lower() != ".pt":
                     continue
                 try:
-                    safe_path = safe_child_path(PRESETS_DIR, candidate.name)
+                    safe_path = safe_child_path(PRESETS_DIR, candidate.name, reject_links=True)
                     if safe_path.is_file():
-                        pts.append(candidate.name)
+                        pts.append((candidate.name, safe_path))
                 except (OSError, ValueError) as exc:
                     logging.warning("Ignoring unsafe preset %s: %s", candidate, exc)
 
-            pts.sort(key=str.casefold)
+            pts.sort(key=lambda item: item[0].casefold())
             display_mode = self.cfg.get("preset_display_mode", "name")
 
-            for pt in pts:
+            for pt, safe_path in pts:
                 name_only = os.path.splitext(pt)[0]
-                full_path = str(safe_child_path(PRESETS_DIR, pt))
+                full_path = str(safe_path)
 
                 if display_mode == "name":
                     disp = name_only
@@ -2649,7 +2758,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 if hasattr(self, "list_presets"):
                     self.list_presets.Append(disp, pt)
 
-        self.combo_presets.SetSelection(0)
+        active_selection = 0
+        if previous_active is not None:
+            for index in range(1, self.combo_presets.GetCount()):
+                if self.combo_presets.GetClientData(index) == previous_active:
+                    active_selection = index
+                    break
+        self.combo_presets.SetSelection(active_selection)
         if hasattr(self, "list_presets") and self.list_presets.GetCount():
             selection = 0
             if previous_managed:
@@ -2669,6 +2784,20 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             )
 
     def AutoLoadModel(self):
+        if not self or self.IsBeingDeleted() or self._closing:
+            return
+        if (
+            self._confirming_close
+            or self.current_op is not None
+            or getattr(self, "rec_stream", None) is not None
+            or getattr(self, "rec_data", ())
+            or any(
+                hasattr(window, "IsModal") and window.IsModal()
+                for window in wx.GetTopLevelWindows()
+            )
+        ):
+            self._autoload_timer = wx.CallLater(250, self.AutoLoadModel)
+            return
         if not self.model:
             self.OnToggleModel(None)
 
@@ -2680,7 +2809,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             def on_success(_result):
                 self.btn_toggle_model.SetLabel(self._("unload_model"))
                 self.Log(self._("model_loaded"), success=True)
-                self.clone_text.SetFocus()
+                if self.clone_text.IsShownOnScreen() and self.clone_text.IsEnabled():
+                    self.clone_text.SetFocus()
                 wx.Bell()
 
             self.RunOperation(
@@ -2761,6 +2891,22 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.item_play_pause.Enable(False)
         self.item_save_result.Enable(False)
 
+    def _CheckTextNormalization(self, language):
+        if not self.cfg.get("normalize_text", False):
+            return True
+        if not language or language == "Auto":
+            message = self._("normalization_choose_language")
+        else:
+            from omnivoice.utils.text import TextNormalizationError, check_normalization_support
+
+            try:
+                check_normalization_support(language)
+                return True
+            except TextNormalizationError as exc:
+                message = operation_error_message(exc, self._)
+        wx.MessageBox(message, self._("error_title"), wx.OK | wx.ICON_ERROR, parent=self)
+        return False
+
     def _finish_generation(self, audio):
         audio_array = np.asarray(audio)
         if audio_array.ndim != 1 or audio_array.size == 0 or not np.isfinite(audio_array).all():
@@ -2771,7 +2917,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.btn_save.Enable()
         self.item_play_pause.Enable()
         self.item_save_result.Enable()
-        self.btn_play.SetFocus()
+        if self.btn_play.IsShownOnScreen() and self.btn_play.IsEnabled():
+            self.btn_play.SetFocus()
         wx.Bell()
         if self.cfg.get("auto_save_gen", False):
             try:
@@ -2809,6 +2956,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             wx.MessageBox(self._("err_no_text"), self._("error_title"), wx.OK | wx.ICON_ERROR)
             return
 
+        if not self._CheckTextNormalization(lang):
+            return
+
         use_preset = preset is not None
         if not use_preset and not os.path.exists(ref_audio):
             wx.MessageBox(
@@ -2817,10 +2967,12 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             return
 
         try:
-            preset_path = str(safe_child_path(PRESETS_DIR, preset)) if use_preset else None
-        except ValueError as exc:
+            preset_path = (
+                str(safe_child_path(PRESETS_DIR, preset, reject_links=True)) if use_preset else None
+            )
+        except (OSError, ValueError) as exc:
             wx.MessageBox(
-                self._("invalid_filename").format(error=str(exc)),
+                self._("preset_access_failed").format(error=validation_error_message(exc, self._)),
                 self._("error_title"),
                 wx.OK | wx.ICON_ERROR,
             )
@@ -2861,7 +3013,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     ):
         state.check_cancelled()
         if preset_path:
-            prompt = VoiceClonePrompt.load(preset_path)
+            preset_path = safe_child_path(PRESETS_DIR, Path(preset_path).name, reject_links=True)
+            prompt = VoiceClonePrompt.load(str(preset_path))
         else:
             prompt = model.create_voice_clone_prompt(
                 ref_audio=ref_audio,
@@ -2930,6 +3083,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             wx.MessageBox(self._("err_no_text"), self._("error_title"), wx.OK | wx.ICON_ERROR)
             return
 
+        if not self._CheckTextNormalization(lang):
+            return
+
         self._prepare_generation()
         self.RunModelOperation(
             "op_auto_title",
@@ -2971,6 +3127,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         gen_config = self.GetGenConfig()
         if not text:
             wx.MessageBox(self._("err_no_text"), self._("error_title"), wx.OK | wx.ICON_ERROR)
+            return
+
+        if not self._CheckTextNormalization(lang):
             return
 
         instructs = []
@@ -3047,10 +3206,12 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if dialog.ShowModal() == wx.ID_OK:
             try:
                 filename = preset_filename(dialog.GetValue())
-                path = safe_child_path(PRESETS_DIR, filename)
-            except ValueError as exc:
+                path = safe_child_path(PRESETS_DIR, filename, reject_links=True)
+            except (OSError, ValueError) as exc:
                 wx.MessageBox(
-                    self._("invalid_filename").format(error=str(exc)),
+                    self._("preset_access_failed").format(
+                        error=validation_error_message(exc, self._)
+                    ),
                     self._("error_title"),
                     wx.OK | wx.ICON_ERROR,
                 )
@@ -3077,7 +3238,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         )
 
     def _PresetSaved(self, saved_path):
-        path = safe_child_path(PRESETS_DIR, os.path.basename(saved_path))
+        path = safe_child_path(PRESETS_DIR, os.path.basename(saved_path), reject_links=True)
         self.Log(self._("preset_saved").format(path=saved_path))
         self.RefreshPresets()
         msg = self._("preset_created_msg").replace("{name}", path.stem)
@@ -3099,6 +3260,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
     @staticmethod
     def _SavePromptAtomically(state, prompt, path):
+        path = Path(path)
+        path = safe_child_path(path.parent, path.name, reject_links=True)
         atomic_write(path, lambda temporary: prompt.save(str(temporary)), state.check_cancelled)
 
     def _SavePresetWorker(
@@ -3113,6 +3276,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         state.check_cancelled()
         self._SavePromptAtomically(state, prompt, path)
         if original_path is not None and original_path != path:
+            original_path = safe_child_path(
+                original_path.parent, original_path.name, reject_links=True
+            )
             original_path.unlink(missing_ok=True)
         return str(path)
 
@@ -3126,10 +3292,16 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 )
             return None
         try:
-            return safe_child_path(PRESETS_DIR, preset)
-        except ValueError as exc:
+            return safe_child_path(PRESETS_DIR, preset, reject_links=True)
+        except (OSError, ValueError) as exc:
             if show_error:
-                wx.MessageBox(str(exc), self._("error_title"), wx.OK | wx.ICON_ERROR)
+                wx.MessageBox(
+                    self._("preset_access_failed").format(
+                        error=validation_error_message(exc, self._)
+                    ),
+                    self._("error_title"),
+                    wx.OK | wx.ICON_ERROR,
+                )
             return None
 
     def OnEditPreset(self, event):
@@ -3153,11 +3325,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             return
 
         try:
-            target_path = safe_child_path(PRESETS_DIR, preset_filename(dialog.name_ctrl.GetValue()))
-        except ValueError as exc:
+            target_path = safe_child_path(
+                PRESETS_DIR, preset_filename(dialog.name_ctrl.GetValue()), reject_links=True
+            )
+        except (OSError, ValueError) as exc:
             dialog.Destroy()
             wx.MessageBox(
-                self._("invalid_filename").format(error=str(exc)),
+                self._("preset_access_failed").format(error=validation_error_message(exc, self._)),
                 self._("error_title"),
                 wx.OK | wx.ICON_ERROR,
             )
@@ -3202,6 +3376,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         state.check_cancelled()
         self._SavePromptAtomically(state, prompt, path)
         if original_path != path:
+            original_path = safe_child_path(
+                original_path.parent, original_path.name, reject_links=True
+            )
             original_path.unlink(missing_ok=True)
         return str(path)
 
@@ -3209,12 +3386,24 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if not self.cfg.get("warn_delete_preset", True):
             return True
         dlg = wx.RichMessageDialog(self, msg, self._("warning_title"), wx.YES_NO | wx.ICON_WARNING)
-        dlg.ShowCheckBox(self._("warn_no_show"))
-        res = dlg.ShowModal()
-        if dlg.IsCheckBoxChecked():
+        try:
+            dlg.ShowCheckBox(self._("warn_no_show"))
+            res = dlg.ShowModal()
+            disable_warning = dlg.IsCheckBoxChecked()
+        finally:
+            dlg.Destroy()
+        if disable_warning:
+            updated = dict(self.cfg, warn_delete_preset=False)
+            try:
+                SaveBasicConfig(updated)
+            except OSError as exc:
+                wx.MessageBox(
+                    self._("config_save_failed").format(error=str(exc)),
+                    self._("error_title"),
+                    wx.OK | wx.ICON_ERROR,
+                )
+                return False
             self.cfg["warn_delete_preset"] = False
-            SaveBasicConfig(self.cfg)
-        dlg.Destroy()
         return res == wx.ID_YES
 
     def OnDelPreset(self, event):
@@ -3225,27 +3414,46 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if not self._CheckDeleteWarning(self._("warn_del_preset").replace("{name}", path.stem)):
             return
 
-        if path.exists():
-            try:
+        try:
+            path = safe_child_path(PRESETS_DIR, path.name, reject_links=True)
+            if path.exists():
                 path.unlink()
-            except OSError as exc:
-                wx.MessageBox(str(exc), self._("error_title"), wx.OK | wx.ICON_ERROR)
-                return
-        self.RefreshPresets()
+        except (OSError, ValueError) as exc:
+            wx.MessageBox(
+                validation_error_message(exc, self._),
+                self._("error_title"),
+                wx.OK | wx.ICON_ERROR,
+            )
+        finally:
+            self.RefreshPresets()
 
     def OnDelAllPresets(self, event):
         if not self._CheckDeleteWarning(self._("warn_del_all")):
             return
 
-        if PRESETS_DIR.exists():
-            for f in os.listdir(PRESETS_DIR):
-                if f.lower().endswith(".pt"):
+        try:
+            if PRESETS_DIR.exists():
+                for candidate in sorted(
+                    PRESETS_DIR.iterdir(), key=lambda item: item.name.casefold()
+                ):
+                    if candidate.suffix.lower() != ".pt":
+                        continue
                     try:
-                        safe_child_path(PRESETS_DIR, f).unlink(missing_ok=True)
-                    except (OSError, ValueError) as exc:
-                        wx.MessageBox(str(exc), self._("error_title"), wx.OK | wx.ICON_ERROR)
-                        return
-        self.RefreshPresets()
+                        path = safe_child_path(PRESETS_DIR, candidate.name, reject_links=True)
+                    except ValueError as exc:
+                        logging.warning("Ignoring unsafe preset %s: %s", candidate, exc)
+                        continue
+                    if path.is_file():
+                        path.unlink(missing_ok=True)
+        except (OSError, ValueError) as exc:
+            wx.MessageBox(
+                validation_error_message(exc, self._),
+                self._("error_title"),
+                wx.OK | wx.ICON_ERROR,
+            )
+            return
+        finally:
+            self.RefreshPresets()
         wx.MessageBox(
             self._("msg_presets_deleted"), self._("success_title"), wx.OK | wx.ICON_INFORMATION
         )
@@ -3260,6 +3468,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
             try:
                 if event.ShiftDown():
+                    path = safe_child_path(PRESETS_DIR, path.name, reject_links=True)
                     if path.exists():
                         path.unlink()
                     self.RefreshPresets()
@@ -3267,11 +3476,17 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                     if self._CheckDeleteWarning(
                         self._("warn_del_preset").replace("{name}", path.stem)
                     ):
+                        path = safe_child_path(PRESETS_DIR, path.name, reject_links=True)
                         if path.exists():
                             path.unlink()
                         self.RefreshPresets()
             except (OSError, ValueError) as exc:
-                wx.MessageBox(str(exc), self._("error_title"), wx.OK | wx.ICON_ERROR)
+                wx.MessageBox(
+                    validation_error_message(exc, self._),
+                    self._("error_title"),
+                    wx.OK | wx.ICON_ERROR,
+                )
+                self.RefreshPresets()
         else:
             event.Skip()
 
@@ -3347,22 +3562,32 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                     self._reset_generated_player()
                     self.panel.Layout()
 
-                self.play_start_time = time.time()
+                self.play_start_time = time.monotonic()
                 self.play_timer = wx.CallLater(duration_ms + 100, on_finish)
 
         elif self.btn_play.GetLabel() == self._("pause"):
             self.is_paused = True
             if hasattr(self, "play_timer") and self.play_timer:
-                if hasattr(self, "play_start_time") and self.play_start_time:
-                    elapsed = time.time() - self.play_start_time
-                    self.current_frame += int(elapsed * self.sample_rate)
+                if self.play_start_time is not None:
+                    elapsed = max(0.0, time.monotonic() - self.play_start_time)
+                    self.current_frame = min(
+                        self.total_frames, self.current_frame + int(elapsed * self.sample_rate)
+                    )
                 self.play_timer.Stop()
             self._stop_sound_device()
+            if self.current_frame >= self.total_frames:
+                self._reset_generated_player()
+                self.panel.Layout()
+                return
             self.btn_play.SetLabel(self._("resume_play"))
 
         elif self.btn_play.GetLabel() == self._("resume_play"):
             self.is_paused = False
             frames_left = self.total_frames - self.current_frame
+            if frames_left <= 0:
+                self._reset_generated_player()
+                self.panel.Layout()
+                return
             if not self._play_sound_data(self.audio_data[self.current_frame :], self.sample_rate):
                 self._reset_generated_player()
                 return
@@ -3376,7 +3601,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 self._reset_generated_player()
                 self.panel.Layout()
 
-            self.play_start_time = time.time()
+            self.play_start_time = time.monotonic()
             self.play_timer = wx.CallLater(duration_ms + 100, on_finish)
 
     def OnStopAudio(self, event):
@@ -3492,7 +3717,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                     duration_ms + 100, lambda: self.StopPlayFile(btn_play, btn_stop, parent_tab)
                 )
                 setattr(self, f"timer_{id(btn_play)}", timer)
-                setattr(self, f"start_{id(btn_play)}", time.time())
+                setattr(self, f"start_{id(btn_play)}", time.monotonic())
 
             except Exception as e:
                 wx.MessageBox(
@@ -3505,15 +3730,26 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             timer = getattr(self, f"timer_{id(btn_play)}", None)
             if timer:
                 start_time = getattr(self, f"start_{id(btn_play)}", None)
-                if start_time:
-                    elapsed = time.time() - start_time
-                    self.ref_current_frame += int(elapsed * self.ref_sample_rate)
+                if start_time is not None:
+                    elapsed = max(0.0, time.monotonic() - start_time)
+                    self.ref_current_frame = min(
+                        self.ref_total_frames,
+                        self.ref_current_frame + int(elapsed * self.ref_sample_rate),
+                    )
                 timer.Stop()
             self._stop_sound_device()
+            if self.ref_current_frame >= self.ref_total_frames:
+                self._reset_reference_player()
+                parent_tab.Layout()
+                return
             btn_play.SetLabel(self._("resume_play"))
 
         elif btn_play.GetLabel() == self._("resume_play"):
             frames_left = self.ref_total_frames - self.ref_current_frame
+            if frames_left <= 0:
+                self._reset_reference_player()
+                parent_tab.Layout()
+                return
             if not self._play_sound_data(
                 self.ref_audio_data[self.ref_current_frame :], self.ref_sample_rate
             ):
@@ -3526,7 +3762,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 duration_ms + 100, lambda: self.StopPlayFile(btn_play, btn_stop, parent_tab)
             )
             setattr(self, f"timer_{id(btn_play)}", timer)
-            setattr(self, f"start_{id(btn_play)}", time.time())
+            setattr(self, f"start_{id(btn_play)}", time.monotonic())
 
     def StopPlayFile(self, btn_play, btn_stop, parent_tab):
         self._stop_sound_device()
@@ -3539,64 +3775,85 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.rec_stream = None
         if stream is not None:
             try:
-                stream.stop()
+                stream.stop(ignore_errors=False)
             finally:
-                stream.close()
+                stream.close(ignore_errors=False)
+
+    def _UpdateRecordingControls(self, button):
+        if getattr(self, "rec_stream", None) is not None:
+            label = "stop_rec"
+        elif getattr(self, "rec_data", ()):
+            label = "record_retry_save"
+        else:
+            label = "rec_ref"
+        button.SetLabel(self._(label))
+        if hasattr(self, "shortcut_menu_items"):
+            self.ApplyShortcutSettings()
+        self._set_operation_controls_enabled(self.current_op is None)
+
+    def _SaveRecording(self, path_ctrl, *, force_dialog=False):
+        if not self.rec_data:
+            raise RuntimeError(self._("record_empty"))
+        audio = np.concatenate(self.rec_data, axis=0)
+        if force_dialog:
+            path = self.PerformSaveAudio(audio, self.rec_fs, is_generated=False, force_dialog=True)
+            if not path:
+                return False
+            path_ctrl.SetValue(str(path))
+        else:
+            atomic_write(
+                RECORDED_AUDIO_FILE,
+                lambda temporary: sf.write(str(temporary), audio, self.rec_fs),
+            )
+            path_ctrl.SetValue(str(RECORDED_AUDIO_FILE))
+            if self.cfg.get("auto_save_rec", False):
+                self.PerformSaveAudio(audio, self.rec_fs, is_generated=False)
+        self.rec_data = []
+        wx.Bell()
+        return True
 
     def ToggleRecord(self, btn, path_ctrl):
-        if getattr(self, "rec_stream", None) is None:
-            try:
-                btn.SetLabel(self._("stop_rec"))
+        if getattr(self, "_closing", False) or getattr(self, "_confirming_close", False):
+            return
+        if self.current_op is not None:
+            wx.MessageBox(
+                self._("operation_busy"), self._("warning_title"), wx.OK | wx.ICON_WARNING
+            )
+            return
+        try:
+            if getattr(self, "rec_stream", None) is None and getattr(self, "rec_data", ()):
+                self._SaveRecording(path_ctrl, force_dialog=True)
+            elif getattr(self, "rec_stream", None) is None:
                 self.rec_data = []
                 chunks = self.rec_data
-                self.rec_fs = 24000
 
                 def callback(indata, frames, time_info, status):
                     if status:
                         logging.warning("Audio input status: %s", status)
                     chunks.append(indata.copy())
 
-                self.rec_stream = sd.InputStream(
-                    samplerate=self.rec_fs, channels=1, callback=callback
-                )
+                self.rec_stream = sd.InputStream(channels=1, callback=callback)
+                self.rec_fs = int(round(float(self.rec_stream.samplerate)))
+                if self.rec_fs <= 0:
+                    raise ValueError(self._("record_invalid_sample_rate"))
                 self.rec_stream.start()
-            except Exception as exc:
+            else:
+                self._CloseRecording()
+                self._SaveRecording(path_ctrl)
+        except Exception as exc:
+            if getattr(self, "rec_stream", None) is not None:
                 try:
                     self._CloseRecording()
                 except Exception:
                     logging.exception("Could not close failed recording stream")
-                self.rec_data = []
-                btn.SetLabel(self._("rec_ref"))
-                wx.MessageBox(
-                    self._("record_failed").format(error=str(exc)),
-                    self._("error_title"),
-                    wx.OK | wx.ICON_ERROR,
-                )
-        else:
-            btn.SetLabel(self._("rec_ref"))
-            try:
-                self._CloseRecording()
-
-                if hasattr(self, "rec_data") and self.rec_data:
-                    audio = np.concatenate(self.rec_data, axis=0)
-                    atomic_write(
-                        RECORDED_AUDIO_FILE,
-                        lambda temporary: sf.write(str(temporary), audio, self.rec_fs),
-                    )
-                    path_ctrl.SetValue(str(RECORDED_AUDIO_FILE))
-                    wx.Bell()
-                    if self.cfg.get("auto_save_rec", False):
-                        self.PerformSaveAudio(audio, self.rec_fs, is_generated=False)
-                else:
-                    raise RuntimeError(self._("record_empty"))
-            except Exception as exc:
-                wx.MessageBox(
-                    self._("record_failed").format(error=str(exc)),
-                    self._("error_title"),
-                    wx.OK | wx.ICON_ERROR,
-                )
-            finally:
-                self.rec_data = []
+            message = "record_failed_kept" if self.rec_data else "record_failed"
+            wx.MessageBox(
+                self._(message).format(error=validation_error_message(exc, self._)),
+                self._("error_title"),
+                wx.OK | wx.ICON_ERROR,
+            )
+        finally:
+            self._UpdateRecordingControls(btn)
 
     def OnShowTags(self, event):
         wx.MessageBox(self._("msg_tags"), self._("title_tags"), wx.OK | wx.ICON_INFORMATION)

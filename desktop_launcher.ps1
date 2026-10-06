@@ -7,7 +7,9 @@ param(
     [switch]$BootstrapOnly,
     [switch]$InstallOnly,
     [switch]$SelfTest,
-    [switch]$QueryHiddenLaunch
+    [switch]$QueryHiddenLaunch,
+    [Parameter(DontShow)]
+    [switch]$HiddenLaunch
 )
 
 $ModeWasExplicit = $PSBoundParameters.ContainsKey("Mode")
@@ -31,7 +33,7 @@ $PythonArchiveSha256 = "0EB85C2DFCCCCF1B17352DE4C397F69194035B7D37149EACC16F1147
 $LauncherRevision = 8
 $script:LastRuntimeError = ""
 $script:LastStartupLog = ""
-$script:WasHiddenBackgroundLaunch = $false
+$script:WasHiddenBackgroundLaunch = [bool]$HiddenLaunch
 
 function Write-Step {
     param([string]$Message)
@@ -153,7 +155,7 @@ function Start-DesktopGui {
             Write-WarningMessage "No pythonw.exe found. Keeping the console visible for startup errors."
             Show-LauncherConsole
         }
-        & $Python -E -s -m omnisonic.app
+        Invoke-WithIsolatedPythonEnvironment { & $Python -E -s -m omnisonic.app }
         if ($LASTEXITCODE -ne 0) { throw "OmniSonic exited with code $LASTEXITCODE." }
         return
     }
@@ -174,9 +176,11 @@ function Start-DesktopGui {
     $env:OMNISONIC_STARTUP_PROCESS = $processPath
     $removeReady = $true
     try {
-        $process = Start-Process -FilePath $guiPython `
-            -ArgumentList @('-E', '-s', '-m', $StartupModule) `
-            -WorkingDirectory $ProjectRoot -PassThru
+        $process = Invoke-WithIsolatedPythonEnvironment {
+            Start-Process -FilePath $guiPython `
+                -ArgumentList @('-E', '-s', '-m', $StartupModule) `
+                -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru
+        }
         if (-not $process) { throw "Could not start pythonw.exe. Log: $($script:LastStartupLog)" }
         $timer = [Diagnostics.Stopwatch]::StartNew()
         $nextUpdate = 15
@@ -256,10 +260,170 @@ function Remove-LauncherDirectory {
     Remove-Item -LiteralPath $target -Recurse -Force
 }
 
+function Enter-LauncherLock {
+    $lockPath = Assert-ProjectChildPath (Join-Path $WorkDir 'runtime.lock')
+    New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
+    try {
+        return [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    }
+    catch [IO.IOException] {
+        if (($_.Exception.HResult -band 0xFFFF) -in @(32, 33)) {
+            throw 'Another OmniSonic launcher is using this project. Wait for startup to finish or close the existing launcher before retrying. / Inny launcher OmniSonic korzysta z tego projektu. Poczekaj na zakonczenie uruchamiania lub zamknij poprzedni launcher.'
+        }
+        throw
+    }
+}
+
+function Test-RuntimeInUseError {
+    param([Exception]$Exception)
+    while ($null -ne $Exception) {
+        if ($Exception.Data['OmniSonicRuntimeInUse']) { return $true }
+        $Exception = $Exception.InnerException
+    }
+    return $false
+}
+
+function Assert-RuntimeNotInUse {
+    param([string[]]$EnvironmentRoots)
+    $roots = @($EnvironmentRoots | ForEach-Object {
+        (Assert-ProjectChildPath $_).TrimEnd('\')
+    })
+    foreach ($process in @(Get-CimInstance Win32_Process -ErrorAction Stop)) {
+        $candidates = @([string]$process.ExecutablePath)
+        $commandLine = [string]$process.CommandLine
+        if ($commandLine -match '^\s*"([^"\r\n]+)"(?:\s|$)') {
+            $candidates += $Matches[1]
+        }
+        elseif ($commandLine -match '^\s*([^\s"]+)(?:\s|$)') {
+            $candidates += $Matches[1]
+        }
+        foreach ($candidate in $candidates) {
+            if ($candidate -notmatch '^(?:[A-Za-z]:[\\/]|\\\\)') { continue }
+            try { $executable = [IO.Path]::GetFullPath($candidate) }
+            catch { continue }
+            foreach ($root in $roots) {
+                if ($executable.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                    $message = "Close the program using this OmniSonic environment before repairing or switching it (PID $($process.ProcessId)): $root. / Zamknij program korzystajacy z tego srodowiska OmniSonic przed jego naprawa lub zmiana."
+                    $failure = New-Object InvalidOperationException($message)
+                    $failure.Data['OmniSonicRuntimeInUse'] = $true
+                    throw $failure
+                }
+            }
+        }
+    }
+}
+
+function Invoke-WithIsolatedPythonEnvironment {
+    param([scriptblock]$Action)
+    # Interpreter flags do not sanitize variables inherited by build/model
+    # subprocesses. Limit this to Python paths/startup; preserve proxy, TLS,
+    # pip repository/policy, accelerator, and application settings.
+    $names = @('PYTHONHOME', 'PYTHONPATH', 'PYTHONUSERBASE', 'PYTHONSTARTUP',
+        'PYTHONINSPECT', 'PYTHONPLATLIBDIR', 'PYTHONPYCACHEPREFIX', 'PYTHONNOUSERSITE')
+    $previous = @{}
+    foreach ($name in $names) {
+        $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    }
+    try {
+        foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $null, 'Process') }
+        [Environment]::SetEnvironmentVariable('PYTHONNOUSERSITE', '1', 'Process')
+        & $Action
+    }
+    finally {
+        foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process') }
+    }
+}
+
+function New-PipConfigurationError {
+    param([string]$Message)
+    $failure = New-Object InvalidOperationException($Message)
+    $failure.Data['LauncherPipConfiguration'] = $true
+    return $failure
+}
+
+function Test-PipConfigurationError {
+    param([Exception]$Exception)
+    while ($null -ne $Exception) {
+        if ($Exception.Data['LauncherPipConfiguration']) { return $true }
+        $Exception = $Exception.InnerException
+    }
+    return $false
+}
+
+function Assert-PipRuntimeSettings {
+    param([string]$Python, [string]$Command = 'install')
+    # Parse only: pip's normal main parser can re-execute another interpreter.
+    # Never invoke that dispatch path or expose configuration values here.
+    $check = @'
+import sys
+try:
+    from pip._internal.cli.main_parser import create_main_parser
+    from pip._internal.commands import create_command
+    from pip._internal.utils.virtualenv import running_under_virtualenv
+except ImportError:
+    raise SystemExit(92)
+try:
+    command_name = sys.argv[1]
+    general, _ = create_main_parser().parse_args([])
+    command = None if command_name.startswith('-') else create_command(command_name)
+    options = general if command is None else command.parse_args([])[0]
+    redirected = bool(getattr(general, 'python', None) or getattr(options, 'python', None))
+    require_venv = bool(getattr(options, 'require_venv', False))
+    missing_venv = command is not None and not command.ignore_require_venv and require_venv and not running_under_virtualenv()
+    conflicts = []
+    if command_name in ('install', 'wheel', 'download'):
+        install, _ = create_command('install').parse_args([])
+        fields = {'target': 'target_dir', 'prefix': 'prefix_path', 'root': 'root_path', 'user': 'use_user_site'}
+        conflicts = [name for name, field in fields.items() if getattr(install, field, None)]
+except BaseException:
+    print('LAUNCHER_PIP_CONFIGURATION_INVALID')
+    raise SystemExit(96)
+if redirected:
+    print('LAUNCHER_PIP_INTERPRETER')
+    raise SystemExit(94)
+if conflicts:
+    print('LAUNCHER_PIP_DESTINATION:' + ','.join(conflicts))
+    raise SystemExit(93)
+if missing_venv:
+    print('LAUNCHER_PIP_REQUIRES_VENV')
+    raise SystemExit(95)
+'@
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $global:LASTEXITCODE = -1
+        $output = @(Invoke-WithIsolatedPythonEnvironment { & $Python -I -c $check $Command 2>&1 })
+        $exitCode = $global:LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousErrorAction }
+    if ($exitCode -eq 0) { return }
+    $lines = @($output | ForEach-Object { $_.ToString() })
+    if ($exitCode -eq 94 -and $lines -contains 'LAUNCHER_PIP_INTERPRETER') {
+        throw (New-PipConfigurationError "External pip settings select a different Python interpreter. Review PIP_PYTHON and pip.ini before retrying. The launcher did not run that interpreter. Ustawienia pip wskazuja innego Pythona; sprawdz PIP_PYTHON oraz pip.ini.")
+    }
+    if ($exitCode -eq 95 -and $lines -contains 'LAUNCHER_PIP_REQUIRES_VENV') {
+        throw (New-PipConfigurationError "Pip policy requires a virtual environment, but the selected Python is standalone. Use -Mode System with a compatible installed Python, or review PIP_REQUIRE_VIRTUALENV / require-virtualenv with the person responsible for that policy. The launcher did not disable the policy. Zasady pip wymagaja venv; wybierz -Mode System ze zgodnym Pythonem systemowym albo uzgodnij zmiane tej zasady.")
+    }
+    if ($exitCode -eq 96 -and $lines -contains 'LAUNCHER_PIP_CONFIGURATION_INVALID') {
+        throw (New-PipConfigurationError "Pip configuration could not be parsed. Review pip.ini and PIP_* settings before retrying; reinstalling the accelerator will not fix this configuration. Nie mozna odczytac konfiguracji pip; sprawdz pip.ini i ustawienia PIP_*.")
+    }
+    $conflicts = @($output | ForEach-Object { $_.ToString() } |
+        Where-Object { $_ -match '^LAUNCHER_PIP_DESTINATION:(target|prefix|root|user)(,(target|prefix|root|user))*$' })
+    if ($exitCode -eq 93 -and $conflicts.Count -eq 1) {
+        $names = $conflicts[0].Substring('LAUNCHER_PIP_DESTINATION:'.Length)
+        throw (New-PipConfigurationError "External pip settings redirect package installation ($names). Review PIP_TARGET, PIP_PREFIX, PIP_ROOT, PIP_USER and pip.ini before retrying. No packages were installed by this command. Zewnetrzne ustawienia pip zmieniaja katalog instalacji pakietow; sprawdz je przed ponowna proba.")
+    }
+    throw "Could not safely verify pip installation settings (exit code $exitCode). Review the runtime's pip configuration before retrying. Nie mozna bezpiecznie sprawdzic ustawien pip; sprawdz jego konfiguracje."
+}
+
 function Invoke-Checked {
     param([string]$FilePath, [string[]]$Arguments, [string]$Description)
     Write-Step $Description
-    & $FilePath -I @Arguments | Out-Host
+    if ($Arguments.Count -ge 3 -and $Arguments[0] -eq '-m' -and $Arguments[1] -eq 'pip') {
+        Assert-PipRuntimeSettings $FilePath $Arguments[2]
+    }
+    Invoke-WithIsolatedPythonEnvironment { & $FilePath -I @Arguments | Out-Host }
     if ($LASTEXITCODE -ne 0) {
         throw "$Description failed with exit code $LASTEXITCODE."
     }
@@ -306,7 +470,7 @@ function Get-StringSha256 {
 
 function Get-ProjectFingerprint {
     $parts = foreach ($relativePath in @(
-        "pyproject.toml", "requirements-desktop.txt", "installer_backends.json"
+        "pyproject.toml", "requirements-desktop.txt", "installer_backends.json", "installer_runtime.py"
     )) {
         $path = Join-Path $ProjectRoot $relativePath
         if (-not (Test-Path -LiteralPath $path)) {
@@ -470,27 +634,48 @@ function Test-CompatiblePython {
         $minimum = [string]$Profile.python_min
         $maximum = [string]$Profile.python_max_exclusive
     }
-    & $Python -I -c "import sys; lo=tuple(map(int, sys.argv[1].split('.'))); hi=tuple(map(int, sys.argv[2].split('.'))); raise SystemExit(0 if lo <= sys.version_info[:2] < hi and sys.maxsize > 2**32 else 1)" $minimum $maximum 2>$null
-    return $LASTEXITCODE -eq 0
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $global:LASTEXITCODE = -1
+        Invoke-WithIsolatedPythonEnvironment {
+            & $Python -I -c "import sys; lo=tuple(map(int, sys.argv[1].split('.'))); hi=tuple(map(int, sys.argv[2].split('.'))); raise SystemExit(0 if lo <= sys.version_info[:2] < hi and sys.maxsize > 2**32 else 1)" $minimum $maximum 2>$null | Out-Null
+        }
+        return $global:LASTEXITCODE -eq 0
+    }
+    catch { return $false }
+    finally { $ErrorActionPreference = $previousErrorAction }
 }
 
 function Find-SystemPython {
     param([object]$Profile)
     $seen = @{}
     $candidates = @()
-    $py = Get-Command "py.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $py) {
+    # A Windows App Execution Alias can precede a real interpreter on PATH.
+    # Probe every executable match, not just the first alias/shim.
+    foreach ($py in @(Get-Command 'py.exe' -All -CommandType Application -ErrorAction SilentlyContinue)) {
         foreach ($selector in @("-3.13", "-3.12", "-3.11", "-3.10", "-3")) {
+            $previousErrorAction = $ErrorActionPreference
             try {
-                $path = (& $py.Source $selector -c "import sys; print(sys.executable)" 2>$null |
-                    Select-Object -Last 1)
-                if ($LASTEXITCODE -eq 0 -and $path) { $candidates += $path.Trim() }
+                $ErrorActionPreference = 'Continue'
+                $global:LASTEXITCODE = -1
+                $encodedPath = (Invoke-WithIsolatedPythonEnvironment {
+                    & $py.Source $selector -I -c "import json, sys; print(json.dumps(sys.executable))" 2>$null
+                } | Select-Object -Last 1)
+                if ($global:LASTEXITCODE -eq 0 -and $encodedPath) {
+                    # ASCII JSON avoids OEM/ANSI/UTF-8 pipe decoding differences
+                    # for interpreter paths containing non-ASCII account names.
+                    $path = ConvertFrom-Json -InputObject ([string]$encodedPath) -ErrorAction Stop
+                    if ($path -is [string] -and [IO.Path]::IsPathRooted($path)) { $candidates += $path }
+                }
             }
             catch { continue }
+            finally { $ErrorActionPreference = $previousErrorAction }
         }
     }
-    $python = Get-Command "python.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $python) { $candidates += $python.Source }
+    foreach ($python in @(Get-Command 'python.exe' -All -CommandType Application -ErrorAction SilentlyContinue)) {
+        $candidates += $python.Source
+    }
     foreach ($candidate in $candidates) {
         if ($seen.ContainsKey($candidate)) { continue }
         $seen[$candidate] = $true
@@ -569,7 +754,7 @@ function Resolve-PythonMode {
             return [pscustomobject]@{ Mode = "System"; SystemPython = $null }
         }
         if ($WasExplicit -or $env:OMNISONIC_PYTHON_MODE -eq "System") {
-            throw "System mode requires a compatible Python $($Profile.python_min)-$($Profile.python_max_exclusive)."
+            throw "System mode requires a compatible Python $($Profile.python_min)-$($Profile.python_max_exclusive). Run start_desktop.bat -Mode Portable to download a local Python. Uruchom start_desktop.bat -Mode Portable, aby pobrac wlasnego Pythona."
         }
         Write-WarningMessage "The saved system Python mode is incompatible with this backend; switching to portable Python $PythonVersion."
         $preferred = "Portable"
@@ -664,12 +849,14 @@ function Install-PythonBootstrapTransaction {
     )
     $stagingRoot = "$ActiveRoot.new"
     $backupRoot = "$ActiveRoot.old"
+    Assert-RuntimeNotInUse @($ActiveRoot, $stagingRoot, $backupRoot)
     $stagingPython = New-PythonEnvironmentAt $SelectedMode $stagingRoot $SystemPython $Profile
     if (-not (Test-CompatiblePython $stagingPython $Profile)) {
         throw "The staged Python bootstrap is not compatible with this backend."
     }
-    Remove-LauncherDirectory $backupRoot
+    Assert-RuntimeNotInUse @($ActiveRoot, $stagingRoot, $backupRoot)
     if (Test-Path -LiteralPath $ActiveRoot) {
+        Remove-LauncherDirectory $backupRoot
         Move-Item -LiteralPath $ActiveRoot -Destination $backupRoot
     }
     try {
@@ -678,14 +865,29 @@ function Install-PythonBootstrapTransaction {
         if (-not (Test-CompatiblePython $python $Profile)) {
             throw "The activated Python bootstrap is not usable."
         }
+        Repair-EnvironmentEntryPoints $python $ActiveRoot $null | Out-Null
         return $python
     }
     catch {
-        Remove-LauncherDirectory $ActiveRoot
-        if (Test-Path -LiteralPath $backupRoot) {
-            Move-Item -LiteralPath $backupRoot -Destination $ActiveRoot
+        if (Test-RuntimeInUseError $_.Exception) { throw }
+        $activationError = $_.Exception.Message
+        $restored = $false
+        try {
+            Assert-RuntimeNotInUse @($ActiveRoot, $backupRoot)
+            Remove-LauncherDirectory $ActiveRoot
+            if (Test-Path -LiteralPath $backupRoot) {
+                Move-Item -LiteralPath $backupRoot -Destination $ActiveRoot
+                $restored = $true
+            }
         }
-        throw "The previous environment was restored after bootstrap failure. $($_.Exception.Message)"
+        catch {
+            if (Test-RuntimeInUseError $_.Exception) { throw }
+            throw "Python bootstrap failed and automatic recovery failed. Inspect the environment at $ActiveRoot and backup at $backupRoot. Bootstrap error: $activationError Recovery error: $($_.Exception.Message)"
+        }
+        if ($restored) {
+            throw "The previous environment was restored after bootstrap failure. $activationError"
+        }
+        throw "Python bootstrap failed. No previous environment was available to restore. $activationError"
     }
 }
 
@@ -697,7 +899,9 @@ function Invoke-AcceleratorProbe {
         # Windows PowerShell 5.1 wraps native stderr warnings in ErrorRecords.
         # A warning must not abort parsing the probe's JSON result and exit code.
         $ErrorActionPreference = 'Continue'
-        $output = @(& $Python -I -X utf8 $probeScript --validate $ExpectedBackend --requirements $RuntimeRequirementsPath --json 2>&1)
+        $output = @(Invoke-WithIsolatedPythonEnvironment {
+            & $Python -I -X utf8 $probeScript --validate $ExpectedBackend --requirements $RuntimeRequirementsPath --json 2>&1
+        })
         $exitCode = $LASTEXITCODE
     } finally { $ErrorActionPreference = $previousErrorAction }
     $textOutput = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
@@ -742,6 +946,81 @@ function Read-ReadyMarker {
     catch { return $null }
 }
 
+function Get-RuntimeRepairFingerprint {
+    $helper = Join-Path $ProjectRoot 'installer_runtime.py'
+    return (Get-FileHash -LiteralPath $helper -Algorithm SHA256).Hash
+}
+
+function Invoke-EntryPointRepair {
+    param([string]$Python, [string]$EnvironmentRoot, [switch]$Apply)
+    $helper = Join-Path $ProjectRoot 'installer_runtime.py'
+    $operation = if ($Apply) { '--repair' } else { '--check' }
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $global:LASTEXITCODE = -1
+        $output = @(Invoke-WithIsolatedPythonEnvironment {
+            & $Python -I -B $helper --root $EnvironmentRoot $operation --json 2>&1
+        })
+        $exitCode = $global:LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousErrorAction }
+    $jsonLine = $output | ForEach-Object { $_.ToString() } |
+        Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1
+    if (-not $jsonLine) {
+        throw "Runtime entry-point check returned no diagnostics (exit code $exitCode). Nie otrzymano wyniku kontroli plikow uruchamiajacych Pythona."
+    }
+    $result = $jsonLine | ConvertFrom-Json
+    if ($exitCode -ne 0 -or -not $result.ok) {
+        throw "Runtime entry-point repair failed: $($result.error). Nie udalo sie naprawic sciezek uruchamiania pakietow Pythona."
+    }
+    return $result
+}
+
+function Repair-EnvironmentEntryPoints {
+    param([string]$Python, [string]$EnvironmentRoot, [object]$Marker)
+    $runtimeRoot = Assert-ProjectChildPath $EnvironmentRoot
+    $fingerprint = Get-RuntimeRepairFingerprint
+    if ($null -ne $Marker -and $null -ne $Marker.PSObject.Properties['entrypoint_root'] -and
+        $null -ne $Marker.PSObject.Properties['entrypoint_fingerprint'] -and
+        [string]$Marker.entrypoint_root -eq $runtimeRoot -and
+        [string]$Marker.entrypoint_fingerprint -eq $fingerprint) {
+        return $false
+    }
+    $plan = Invoke-EntryPointRepair $Python $runtimeRoot
+    if ($plan.needs_repair) {
+        # The read-only helper has exited before checking other runtime users.
+        Assert-RuntimeNotInUse @($runtimeRoot)
+        Write-Step 'Repairing relocated Python entry points / Naprawianie sciezek pakietow Pythona...'
+        $result = Invoke-EntryPointRepair $Python $runtimeRoot -Apply
+        if ($result.backup_directory) {
+            Write-WarningMessage "Recovery copies retained / Zachowano kopie odzyskiwania: $($result.backup_directory)"
+        }
+    }
+    return $true
+}
+
+function Invoke-QuietRuntimeCheck {
+    param([string]$Python, [string[]]$Arguments, [string]$FailureMessage)
+    $moduleIndex = [Array]::IndexOf($Arguments, '-m')
+    if ($moduleIndex -ge 0 -and $Arguments.Count -gt $moduleIndex + 2 -and
+        $Arguments[$moduleIndex + 1] -eq 'pip') {
+        Assert-PipRuntimeSettings $Python $Arguments[$moduleIndex + 2]
+    }
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $global:LASTEXITCODE = -1
+        $output = @(Invoke-WithIsolatedPythonEnvironment { & $Python @Arguments 2>&1 })
+        $exitCode = $global:LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousErrorAction }
+    if ($exitCode -ne 0) {
+        $details = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+        throw "$FailureMessage (exit code $exitCode).`n$details"
+    }
+}
+
 function Test-Runtime {
     param(
         [string]$Python, [string]$ExpectedBackend, [object]$Profile,
@@ -757,6 +1036,7 @@ function Test-Runtime {
             throw "The environment uses an incompatible Python version."
         }
         $marker = Read-ReadyMarker $EnvironmentRoot
+        $entryPointsChecked = Repair-EnvironmentEntryPoints $Python $EnvironmentRoot $marker
         $markerValid = Test-ReadyMarkerData -Marker $marker `
             -ExpectedBackend $ExpectedBackend -HardwareFingerprint $HardwareFingerprint `
             -ProjectFingerprint (Get-ProjectFingerprint) `
@@ -769,10 +1049,11 @@ function Test-Runtime {
             $Quick = $false
         }
         if (-not $Quick) {
-            & $Python -E -s -c "import accelerate, librosa, numpy, sounddevice, soundfile, torch, torchaudio, transformers, webdataset, wx; import omnivoice, omnisonic.app" 2>$null
-            if ($LASTEXITCODE -ne 0) { throw "One or more OmniSonic runtime imports failed." }
-            & $Python -I -m pip check *> $null
-            if ($LASTEXITCODE -ne 0) { throw "pip check found an inconsistent environment." }
+            Invoke-QuietRuntimeCheck $Python @('-E', '-s', '-c',
+                'import accelerate, librosa, numpy, sounddevice, soundfile, torch, torchaudio, transformers, webdataset, wx; import omnivoice, omnisonic.app') `
+                'One or more OmniSonic runtime imports failed'
+            Invoke-QuietRuntimeCheck $Python @('-I', '-m', 'pip', 'check') `
+                'pip check found an inconsistent environment'
         }
         $probe = Invoke-AcceleratorProbe $Python $ExpectedBackend
         if ([string]$probe.torch_version -ne [string]$Profile.torch_version) {
@@ -781,7 +1062,7 @@ function Test-Runtime {
         if ([string]$probe.torchaudio_version -ne [string]$Profile.torchaudio_version) {
             throw "Installed torchaudio $($probe.torchaudio_version) does not match $($Profile.torchaudio_version)."
         }
-        if (-not $markerValid) {
+        if (-not $markerValid -or $entryPointsChecked) {
             Write-ReadyMarker $EnvironmentRoot "auto" $ExpectedBackend $Profile `
                 $HardwareFingerprint $Python $probe
         }
@@ -789,8 +1070,23 @@ function Test-Runtime {
     }
     catch {
         $script:LastRuntimeError = $_.Exception.Message
+        if (Test-RuntimeInUseError $_.Exception) { throw }
+        if (Test-PipConfigurationError $_.Exception) { throw }
         return $false
     }
+}
+
+function Get-RuntimePythonVersion {
+    param([string]$Python)
+    $versionOutput = Invoke-WithIsolatedPythonEnvironment {
+        & $Python -I -c 'import platform; print(platform.python_version())'
+    }
+    $exitCode = $LASTEXITCODE
+    $version = @($versionOutput) | Select-Object -Last 1
+    if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace([string]$version)) {
+        throw "Could not determine the runtime Python version (exit code $exitCode)."
+    }
+    return ([string]$version).Trim()
 }
 
 function Write-ReadyMarker {
@@ -799,11 +1095,12 @@ function Write-ReadyMarker {
         [string]$SelectedBackend, [object]$Profile, [string]$HardwareFingerprint,
         [string]$Python, [object]$Probe
     )
-    $pythonVersion = (& $Python -c "import platform; print(platform.python_version())" |
-        Select-Object -Last 1).Trim()
+    $pythonVersion = Get-RuntimePythonVersion $Python
     $payload = [ordered]@{
         revision = $LauncherRevision
         project = Get-ProjectFingerprint
+        entrypoint_root = [IO.Path]::GetFullPath($EnvironmentRoot).TrimEnd('\')
+        entrypoint_fingerprint = Get-RuntimeRepairFingerprint
         profile_fingerprint = Get-ProfileFingerprint $Profile
         requested_backend = $RequestedBackend
         backend = $SelectedBackend
@@ -885,6 +1182,7 @@ function Install-RuntimeTransaction {
     Assert-ProjectChildPath $activeRoot | Out-Null
     Assert-ProjectChildPath $stagingRoot | Out-Null
     Assert-ProjectChildPath $backupRoot | Out-Null
+    Assert-RuntimeNotInUse @($activeRoot, $stagingRoot, $backupRoot, "$activeRoot.failed")
     Remove-LauncherDirectory $stagingRoot
     $stagingPython = New-PythonEnvironmentAt $SelectedMode $stagingRoot $SystemPython $Profile
     try {
@@ -895,9 +1193,14 @@ function Install-RuntimeTransaction {
             throw "Staged runtime validation failed: $script:LastRuntimeError"
         }
     }
-    catch { throw "The staged environment was not activated. $($_.Exception.Message)" }
-    Remove-LauncherDirectory $backupRoot
+    catch {
+        if (Test-RuntimeInUseError $_.Exception) { throw }
+        if (Test-PipConfigurationError $_.Exception) { throw }
+        throw "The staged environment was not activated. $($_.Exception.Message)"
+    }
+    Assert-RuntimeNotInUse @($activeRoot, $stagingRoot, $backupRoot, "$activeRoot.failed")
     if (Test-Path -LiteralPath $activeRoot) {
+        Remove-LauncherDirectory $backupRoot
         Move-Item -LiteralPath $activeRoot -Destination $backupRoot
     }
     try {
@@ -910,16 +1213,39 @@ function Install-RuntimeTransaction {
         return $activePython
     }
     catch {
+        if (Test-RuntimeInUseError $_.Exception) { throw }
+        $activationError = $_.Exception.Message
+        $activationWasPipConfigurationError = Test-PipConfigurationError $_.Exception
         $failedRoot = "$activeRoot.failed"
-        Remove-LauncherDirectory $failedRoot
-        if (Test-Path -LiteralPath $activeRoot) {
-            Move-Item -LiteralPath $activeRoot -Destination $failedRoot
+        $restored = $false
+        try {
+            Assert-RuntimeNotInUse @($activeRoot, $backupRoot, $failedRoot)
+            Remove-LauncherDirectory $failedRoot
+            if (Test-Path -LiteralPath $activeRoot) {
+                Move-Item -LiteralPath $activeRoot -Destination $failedRoot
+            }
+            if (Test-Path -LiteralPath $backupRoot) {
+                Move-Item -LiteralPath $backupRoot -Destination $activeRoot
+                $restored = $true
+            }
+            Remove-LauncherDirectory $failedRoot
         }
-        if (Test-Path -LiteralPath $backupRoot) {
-            Move-Item -LiteralPath $backupRoot -Destination $activeRoot
+        catch {
+            if (Test-RuntimeInUseError $_.Exception) { throw }
+            $recoveryState = if ($restored) { 'The previous environment was restored, but failed-runtime cleanup failed.' }
+                else { "Automatic recovery failed. Inspect the environment at $activeRoot, backup at $backupRoot and failed runtime at $failedRoot." }
+            if ($activationWasPipConfigurationError) {
+                throw (New-PipConfigurationError "$recoveryState Activation error: $activationError Recovery error: $($_.Exception.Message)")
+            }
+            throw "$recoveryState Activation error: $activationError Recovery error: $($_.Exception.Message)"
         }
-        Remove-LauncherDirectory $failedRoot
-        throw "The previous environment was restored. $($_.Exception.Message)"
+        if ($activationWasPipConfigurationError) {
+            $recoveryState = if ($restored) { 'The previous environment was restored.' }
+                else { 'Runtime activation failed. No previous environment was available to restore.' }
+            throw (New-PipConfigurationError "$recoveryState $activationError")
+        }
+        if ($restored) { throw "The previous environment was restored. $activationError" }
+        throw "Runtime activation failed. No previous environment was available to restore. $activationError"
     }
 }
 
@@ -961,6 +1287,8 @@ function Install-WithRecoveryChoice {
             }
         }
         catch {
+            if (Test-RuntimeInUseError $_.Exception) { throw }
+            if (Test-PipConfigurationError $_.Exception) { throw }
             $details = $_.Exception.Message
             if ($SelectedBackend -eq "cpu") { throw $details }
             Show-LauncherConsole
@@ -994,7 +1322,7 @@ function Invoke-SelfTest {
     $matrix = Get-BackendMatrix
     foreach ($requiredPath in @(
         "pyproject.toml", "requirements-desktop.txt", "installer_backends.json",
-        "omnisonic\app.py", "omnisonic\accelerator.py", "start_desktop.bat"
+        "omnisonic\app.py", "omnisonic\accelerator.py", "start_desktop.bat", "installer_runtime.py"
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot $requiredPath))) {
             throw "$requiredPath is missing."
@@ -1073,14 +1401,7 @@ function Invoke-SelfTest {
     Write-Host "OmniSonic launcher self-test: OK (CUDA, ROCm, XPU, CPU)"
 }
 
-function Invoke-Main {
-    Set-Location -LiteralPath $ProjectRoot
-    if ($QueryHiddenLaunch) {
-        if (Test-HiddenLaunchReady) { Write-Output "HIDE" }
-        else { Write-Output "FOREGROUND" }
-        return
-    }
-    if ($SelfTest) { Invoke-SelfTest; return }
+function Invoke-LauncherSession {
     $matrix = Get-BackendMatrix
     $controllers = Get-VideoControllers
     $processorName = Get-ProcessorName
@@ -1130,8 +1451,7 @@ function Invoke-Main {
         return
     }
     $hideConsole = Get-HideConsolePreference
-    $script:WasHiddenBackgroundLaunch = [bool](Test-HiddenLaunchReady)
-    if ($script:WasHiddenBackgroundLaunch) { Hide-LauncherConsole }
+    if (Test-HiddenLaunchReady) { Hide-LauncherConsole }
     if (-not (Test-Runtime $python $selectedBackend $profile $hardwareFingerprint $activeRoot -Quick:(-not $InstallOnly))) {
         Show-LauncherConsole
         if ($script:LastRuntimeError) { Write-Step "Runtime repair required: $script:LastRuntimeError" }
@@ -1160,6 +1480,20 @@ function Invoke-Main {
     $env:OMNISONIC_APP_DIR = $ProjectRoot
     $env:OMNISONIC_ACTIVE_BACKEND = $selectedBackend
     Start-DesktopGui -Python $python -HideConsole $hideConsole
+}
+
+function Invoke-Main {
+    $script:WasHiddenBackgroundLaunch = [bool]$HiddenLaunch
+    Set-Location -LiteralPath $ProjectRoot
+    if ($QueryHiddenLaunch) {
+        if (Test-HiddenLaunchReady) { Write-Output 'HIDE' }
+        else { Write-Output 'FOREGROUND' }
+        return
+    }
+    if ($SelfTest) { Invoke-SelfTest; return }
+    $launcherLock = Enter-LauncherLock
+    try { Invoke-LauncherSession }
+    finally { $launcherLock.Dispose() }
 }
 
 if ($MyInvocation.InvocationName -eq '.') { return }

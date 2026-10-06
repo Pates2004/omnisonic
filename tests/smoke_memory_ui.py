@@ -123,6 +123,11 @@ def main():
         patch.object(wx, "MessageBox", return_value=wx.OK),
         patch.object(wx, "Bell"),
         patch.object(desktop, "OperationDialog", SilentProgress),
+        patch.object(frame.clone_text, "SetFocus", wraps=frame.clone_text.SetFocus) as clone_focus,
+        patch.object(
+            frame.clone_ref_text, "SetFocus", wraps=frame.clone_ref_text.SetFocus
+        ) as transcript_focus,
+        patch.object(frame.btn_play, "SetFocus", wraps=frame.btn_play.SetFocus) as playback_focus,
     ):
         try:
             dialog = desktop.SettingsDialog(frame, current_cfg=deepcopy(frame.cfg))
@@ -208,11 +213,31 @@ def main():
             # settings off, and OperationState never retains the loaded model.
             frame.cfg["unload_asr_after_transcription"] = False
             frame.cfg["unload_omnivoice_after_operation"] = False
+            with (
+                patch.object(
+                    frame._models,
+                    "factory",
+                    side_effect=FileNotFoundError(2, "No such file or directory"),
+                ),
+                patch.object(frame, "Log", wraps=frame.Log) as log,
+            ):
+                frame.OnToggleModel(None)
+                idle()
+                assert frame.model is None
+                assert not any(
+                    call.args[0] == frame._("model_unloaded") for call in log.call_args_list
+                )
+                assert any("[Errno 2]" in call.args[0] for call in log.call_args_list)
             frame.OnToggleModel(None)
             idle()
             assert frame.model is not None
             frame.OnToggleModel(None)
             released()
+            # This frame is intentionally hidden; native focus must not be sent
+            # to hidden controls, including inactive notebook pages in real use.
+            clone_focus.assert_not_called()
+            transcript_focus.assert_not_called()
+            playback_focus.assert_not_called()
             print(
                 "Memory settings, persistence/reset, all generation modes, preset, batch, ASR reload, error/cancel: OK"
             )

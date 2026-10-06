@@ -15,7 +15,11 @@ import numpy as np
 
 from omnisonic.files import atomic_write, write_numbered_audio
 from omnisonic.operations import OperationState
-from omnisonic.validation import validate_filename_component
+from omnisonic.validation import (
+    safe_child_path,
+    validate_filename_component,
+    validation_error_message,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,9 +60,10 @@ class FileSafetyTests(unittest.TestCase):
             Path(path).write_bytes(b"replacement")
             state.request_cancel()
 
-        save_prompt = app_methods({"_SavePromptAtomically"}, {"atomic_write": atomic_write})[
-            "_SavePromptAtomically"
-        ]
+        save_prompt = app_methods(
+            {"_SavePromptAtomically"},
+            {"atomic_write": atomic_write, "safe_child_path": safe_child_path, "Path": Path},
+        )["_SavePromptAtomically"]
         from omnisonic.operations import OperationCancelled
 
         with self.assertRaises(OperationCancelled):
@@ -175,9 +180,12 @@ class FileSafetyTests(unittest.TestCase):
 class RecordingTests(unittest.TestCase):
     def setUp(self):
         self.sd, self.wx = Mock(), MagicMock()
+        self.sd.InputStream.return_value.samplerate = 48000
         self.write = Mock()
+        self.sf = Mock()
+        handlers = {"ToggleRecord", "_CloseRecording", "_UpdateRecordingControls", "_SaveRecording"}
         namespace = app_methods(
-            {"ToggleRecord", "_CloseRecording"},
+            handlers,
             dict(
                 sd=self.sd,
                 wx=self.wx,
@@ -185,16 +193,26 @@ class RecordingTests(unittest.TestCase):
                 logging=logging,
                 atomic_write=self.write,
                 RECORDED_AUDIO_FILE=Path("synthetic.wav"),
-                sf=Mock(),
+                sf=self.sf,
+                validation_error_message=validation_error_message,
             ),
         )
-        self.frame = SimpleNamespace(cfg={}, rec_stream=None, rec_data=[], _=lambda k: k)
-        for name in ("ToggleRecord", "_CloseRecording"):
+        self.frame = SimpleNamespace(
+            cfg={},
+            current_op=None,
+            rec_stream=None,
+            rec_data=[],
+            rec_fs=48000,
+            PerformSaveAudio=Mock(),
+            _set_operation_controls_enabled=Mock(),
+            _=lambda key: key,
+        )
+        for name in handlers:
             setattr(self.frame, name, namespace[name].__get__(self.frame))
         self.button, self.path = Mock(), Mock()
 
     def test_failed_start_closes_stream_and_allows_retry(self):
-        broken, working = Mock(), Mock()
+        broken, working = Mock(samplerate=48000), Mock(samplerate=48000)
         broken.start.side_effect = RuntimeError("device disconnected")
         self.sd.InputStream.side_effect = [broken, working]
         self.frame.ToggleRecord(self.button, self.path)
@@ -213,9 +231,98 @@ class RecordingTests(unittest.TestCase):
         self.frame.ToggleRecord(self.button, self.path)
         stream.close.assert_called_once()
         self.assertIsNone(self.frame.rec_stream)
-        self.assertEqual(self.frame.rec_data, [])
+        self.assertEqual(len(self.frame.rec_data), 1)
+        self.button.SetLabel.assert_called_with("record_retry_save")
         self.write.assert_not_called()
         self.path.SetValue.assert_not_called()
+
+    def test_default_stream_rate_is_preserved_in_recorded_wav(self):
+        self.write.side_effect = lambda _path, writer: writer(Path("temporary.wav"))
+        for rate in (44100, 48000):
+            with self.subTest(rate=rate):
+                self.sd.InputStream.return_value.samplerate = rate
+                self.frame.ToggleRecord(self.button, self.path)
+                self.assertNotIn("samplerate", self.sd.InputStream.call_args.kwargs)
+                callback = self.sd.InputStream.call_args.kwargs["callback"]
+                callback(np.ones((10, 1)), 10, None, None)
+                self.frame.ToggleRecord(self.button, self.path)
+                self.assertEqual(self.sf.write.call_args.args[2], rate)
+                self.assertEqual(self.frame.rec_data, [])
+                self.assertIsNone(self.frame.rec_stream)
+
+    def test_failed_temp_save_keeps_audio_until_successful_save_as(self):
+        chunks = [np.ones((10, 1))]
+        self.frame.rec_stream = Mock()
+        self.frame.rec_data = chunks
+        self.write.side_effect = OSError("read-only temporary directory")
+        self.frame.ToggleRecord(self.button, self.path)
+        self.assertIs(self.frame.rec_data, chunks)
+        self.path.SetValue.assert_not_called()
+        self.button.SetLabel.assert_called_with("record_retry_save")
+
+        self.frame.PerformSaveAudio.return_value = None
+        self.frame.ToggleRecord(self.button, self.path)
+        self.assertIs(self.frame.rec_data, chunks)
+        self.path.SetValue.assert_not_called()
+
+        self.frame.PerformSaveAudio.side_effect = OSError("destination disconnected")
+        self.frame.ToggleRecord(self.button, self.path)
+        self.assertIs(self.frame.rec_data, chunks)
+
+        self.frame.PerformSaveAudio.side_effect = None
+        self.frame.PerformSaveAudio.return_value = "recovered.wav"
+        self.frame.ToggleRecord(self.button, self.path)
+        self.assertEqual(self.frame.rec_data, [])
+        self.path.SetValue.assert_called_once_with("recovered.wav")
+        self.button.SetLabel.assert_called_with("rec_ref")
+        self.assertTrue(self.frame.PerformSaveAudio.call_args.kwargs["force_dialog"])
+        self.assertFalse(self.frame.PerformSaveAudio.call_args.kwargs["is_generated"])
+        self.sd.InputStream.assert_not_called()
+
+    def test_failed_automatic_export_keeps_audio_and_temp_reference(self):
+        self.frame.cfg["auto_save_rec"] = True
+        self.frame.rec_stream = Mock()
+        chunks = [np.ones((10, 1))]
+        self.frame.rec_data = chunks
+        self.frame.PerformSaveAudio.side_effect = OSError("export failed")
+        self.frame.ToggleRecord(self.button, self.path)
+        self.write.assert_called_once()
+        self.path.SetValue.assert_called_once_with("synthetic.wav")
+        self.assertIs(self.frame.rec_data, chunks)
+        self.button.SetLabel.assert_called_with("record_retry_save")
+
+    def test_cancelled_optional_export_does_not_discard_saved_reference(self):
+        self.frame.cfg["auto_save_rec"] = True
+        self.frame.rec_stream = Mock()
+        self.frame.rec_data = [np.ones((10, 1))]
+        self.frame.PerformSaveAudio.return_value = None
+        self.frame.ToggleRecord(self.button, self.path)
+        self.assertEqual(self.frame.rec_data, [])
+        self.path.SetValue.assert_called_once_with("synthetic.wav")
+        self.wx.MessageBox.assert_not_called()
+
+    def test_partial_failed_start_preserves_chunks_for_recovery(self):
+        def fail_after_capture():
+            callback = self.sd.InputStream.call_args.kwargs["callback"]
+            callback(np.ones((10, 1)), 10, None, None)
+            raise RuntimeError("device disconnected")
+
+        self.sd.InputStream.return_value.start.side_effect = fail_after_capture
+        self.frame.ToggleRecord(self.button, self.path)
+        self.assertIsNone(self.frame.rec_stream)
+        self.assertEqual(len(self.frame.rec_data), 1)
+        self.button.SetLabel.assert_called_with("record_retry_save")
+
+    def test_active_worker_blocks_new_recording_and_pending_save(self):
+        self.frame.current_op = OperationState()
+        for pending in ([], [np.ones((10, 1))]):
+            with self.subTest(pending=bool(pending)):
+                self.frame.rec_data = pending
+                self.frame.ToggleRecord(self.button, self.path)
+                self.assertIs(self.frame.rec_data, pending)
+        self.sd.InputStream.assert_not_called()
+        self.write.assert_not_called()
+        self.frame.PerformSaveAudio.assert_not_called()
 
     def test_old_callback_cannot_contaminate_new_recording(self):
         self.frame.ToggleRecord(self.button, self.path)
@@ -233,6 +340,136 @@ class RecordingTests(unittest.TestCase):
     def test_closing_without_stream_is_safe(self):
         self.frame._CloseRecording()
         self.assertIsNone(self.frame.rec_stream)
+
+
+class RecordingGatingTests(unittest.TestCase):
+    def setUp(self):
+        self.wx = MagicMock(ID_YES=1, YES_NO=2, ICON_QUESTION=4, OK=8, ICON_WARNING=16)
+        self.wx.GetTopLevelWindows.return_value = []
+        self.save_config = Mock()
+        self.operation_dialog = Mock()
+        handlers = {
+            "RunOperation",
+            "_set_operation_controls_enabled",
+            "AutoLoadModel",
+            "OnCloseWindow",
+            "_CloseRecording",
+        }
+        namespace = app_methods(
+            handlers,
+            dict(
+                wx=self.wx,
+                os=Mock(),
+                logging=logging,
+                SaveBasicConfig=self.save_config,
+                OperationDialog=self.operation_dialog,
+                RECORDED_AUDIO_FILE="unused.wav",
+            ),
+        )
+        self.frame = SimpleNamespace(
+            current_op=None,
+            rec_stream=None,
+            rec_data=[],
+            model=None,
+            cfg={"warn_exit": False, "remember_ai_settings": False, "clean_temp": False},
+            _closing=False,
+            _confirming_close=False,
+            _autoload_timer=Mock(),
+            _reference_timer=Mock(),
+            IsBeingDeleted=Mock(return_value=False),
+            OnToggleModel=Mock(),
+            OnStopAudio=Mock(),
+            Destroy=Mock(),
+            btn_gen_clone=Mock(),
+            btn_rec_ref=Mock(),
+            item_generate=Mock(),
+            item_record=Mock(),
+            item_settings=Mock(),
+            Log=Mock(),
+            _=lambda key: key,
+        )
+        for name in handlers:
+            setattr(self.frame, name, namespace[name].__get__(self.frame))
+
+    def test_recording_and_pending_audio_block_operations_but_not_stop_or_retry(self):
+        for active in (False, True):
+            with self.subTest(active=active):
+                self.frame.rec_stream = Mock() if active else None
+                self.frame.rec_data = [] if active else [np.ones((10, 1))]
+                self.frame._set_operation_controls_enabled(True)
+                self.frame.btn_gen_clone.Enable.assert_called_with(False)
+                self.frame.item_generate.Enable.assert_called_with(False)
+                self.frame.item_settings.Enable.assert_called_with(False)
+                self.frame.btn_rec_ref.Enable.assert_called_with(True)
+                self.frame.item_record.Enable.assert_called_with(True)
+                self.assertIsNone(self.frame.RunOperation("title", "message", Mock()))
+                self.operation_dialog.assert_not_called()
+
+        self.frame.rec_stream = None
+        self.frame.rec_data = []
+        self.frame._set_operation_controls_enabled(False)
+        self.frame.btn_rec_ref.Enable.assert_called_with(False)
+        self.frame.item_record.Enable.assert_called_with(False)
+        self.frame._set_operation_controls_enabled(True)
+        self.frame.btn_gen_clone.Enable.assert_called_with(True)
+
+    def test_autoload_waits_without_dialog_until_recording_has_been_saved(self):
+        self.frame.rec_stream = Mock()
+        self.frame.AutoLoadModel()
+        self.frame.rec_stream = None
+        self.frame.rec_data = [np.ones((10, 1))]
+        self.frame.AutoLoadModel()
+        self.frame.OnToggleModel.assert_not_called()
+        self.wx.MessageBox.assert_not_called()
+        self.assertEqual(self.wx.CallLater.call_count, 2)
+        self.frame.rec_data = []
+        self.frame.AutoLoadModel()
+        self.frame.OnToggleModel.assert_called_once_with(None)
+
+    def test_close_warns_before_discarding_active_or_pending_audio_even_without_exit_warning(self):
+        for active in (False, True):
+            with self.subTest(active=active):
+                self.frame._closing = False
+                stream = Mock() if active else None
+                self.frame.rec_stream = stream
+                chunks = [np.ones((10, 1))]
+                self.frame.rec_data = chunks
+                self.wx.MessageDialog.reset_mock()
+                self.wx.MessageDialog.return_value.ShowModal.return_value = 0
+                event = Mock()
+                self.frame.OnCloseWindow(event)
+                event.Veto.assert_called_once()
+                self.assertIs(self.frame.rec_data, chunks)
+                self.assertIs(self.frame.rec_stream, stream)
+                if stream:
+                    stream.close.assert_not_called()
+                self.frame.Destroy.assert_not_called()
+                self.save_config.assert_not_called()
+                self.assertEqual(self.wx.MessageDialog.call_args.args[1], "record_discard_close")
+
+    def test_confirmed_close_discards_pending_audio_with_only_one_warning(self):
+        self.frame.cfg["warn_exit"] = True
+        self.frame.rec_data = [np.ones((10, 1))]
+        self.frame.rec_stream = Mock()
+        stream = self.frame.rec_stream
+        self.wx.MessageDialog.return_value.ShowModal.return_value = self.wx.ID_YES
+        self.frame.OnCloseWindow(Mock())
+        self.wx.MessageDialog.assert_called_once()
+        stream.close.assert_called_once_with(ignore_errors=False)
+        self.assertEqual(self.frame.rec_data, [])
+        self.assertIsNone(self.frame.rec_stream)
+        self.frame.Destroy.assert_called_once()
+
+    def test_failed_settings_save_aborts_close_without_discarding_audio(self):
+        self.frame.rec_data = [np.ones((10, 1))]
+        chunks = self.frame.rec_data
+        self.wx.MessageDialog.return_value.ShowModal.return_value = self.wx.ID_YES
+        self.save_config.side_effect = OSError("settings are read-only")
+        event = Mock()
+        self.frame.OnCloseWindow(event)
+        event.Veto.assert_called_once()
+        self.assertIs(self.frame.rec_data, chunks)
+        self.frame.Destroy.assert_not_called()
 
 
 if __name__ == "__main__":

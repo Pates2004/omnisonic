@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import sys
+import uuid
 import tempfile
 from copy import deepcopy
 from pathlib import Path
@@ -53,7 +55,8 @@ APP_DATA_DIR = PROGRAM_DIR / "config"
 CONFIG_FILE = APP_DATA_DIR / "settings.json"
 PRESETS_DIR = PROGRAM_DIR / "presets"
 TEMP_DIR = APP_DATA_DIR / "temp"
-RECORDED_AUDIO_FILE = TEMP_DIR / "recorded_reference.wav"
+# A second application instance must never overwrite or clean up this recording.
+RECORDED_AUDIO_FILE = TEMP_DIR / f"recorded_reference-{uuid.uuid4().hex}.wav"
 
 
 def default_audio_directory(kind: str) -> Path:
@@ -133,9 +136,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 def _clamp_number(value: Any, default: float, minimum: float, maximum: float) -> float:
     try:
-        return max(minimum, min(maximum, float(value)))
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
         return default
+    if not math.isfinite(number):
+        return default
+    return max(minimum, min(maximum, number))
 
 
 def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -152,7 +158,7 @@ def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
 
     result["font_size"] = int(_clamp_number(result.get("font_size"), 10, 8, 24))
     result["ai_steps"] = int(_clamp_number(result.get("ai_steps"), 32, 1, 100))
-    result["ai_cfg"] = _clamp_number(result.get("ai_cfg"), 2.0, 0.1, 10.0)
+    result["ai_cfg"] = _clamp_number(result.get("ai_cfg"), 2.0, 0.0, 10.0)
     result["ai_speed"] = _clamp_number(result.get("ai_speed"), 1.0, 0.1, 5.0)
     result["ai_t_shift"] = _clamp_number(result.get("ai_t_shift"), 0.1, 0.001, 10.0)
     result["ai_layer_penalty_factor"] = _clamp_number(
@@ -174,12 +180,17 @@ def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     result["ai_fade_duration"] = _clamp_number(result.get("ai_fade_duration"), 0.1, 0.0, 10.0)
     result["duration_val"] = _clamp_number(result.get("duration_val"), 5.0, 0.1, 100.0)
 
-    if result.get("theme") not in {"light", "dark"}:
+    if not isinstance(result.get("theme"), str) or result["theme"] not in {"light", "dark"}:
         result["theme"] = "light"
-    if result.get("preset_display_mode") not in {"name", "path", "name_path"}:
+    if not isinstance(result.get("preset_display_mode"), str) or result[
+        "preset_display_mode"
+    ] not in {"name", "path", "name_path"}:
         result["preset_display_mode"] = "name"
     for key in (
         "language",
+        "clone_lang",
+        "design_lang",
+        "auto_lang",
         "asr_model_name",
         "prefix_gen",
         "prefix_rec",

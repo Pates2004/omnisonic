@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from omnisonic.accelerator import detect_accelerator, validate_accelerator
+from omnisonic.accelerator import detect_accelerator, format_diagnostics, validate_accelerator
 from omnisonic.config import (
     APP_DATA_DIR,
     CONFIG_FILE,
@@ -37,6 +37,52 @@ from omnisonic.validation import (
 
 
 class ConfigTests(unittest.TestCase):
+    def test_recording_paths_are_distinct_across_application_processes(self):
+        import subprocess
+        import sys
+
+        command = [
+            sys.executable,
+            "-B",
+            "-c",
+            "from omnisonic.config import RECORDED_AUDIO_FILE; print(RECORDED_AUDIO_FILE)",
+        ]
+        paths = [
+            Path(subprocess.check_output(command, cwd=PROJECT_ROOT, text=True).strip())
+            for _ in range(2)
+        ]
+        self.assertNotEqual(paths[0], paths[1])
+        self.assertEqual(paths[0].parent, paths[1].parent)
+        self.assertEqual(paths[0].suffix, ".wav")
+
+    def test_each_setting_normalizes_to_finite_json_idempotently(self):
+        values = (
+            None,
+            True,
+            False,
+            0,
+            -1000000,
+            1e30,
+            float("nan"),
+            float("inf"),
+            [],
+            {},
+            ["x"],
+            {"x": False},
+            "",
+            "   ",
+            "NaN",
+            "F24",
+            "Polish",
+            "\0",
+        )
+        for key in DEFAULT_CONFIG:
+            for index, value in enumerate(values):
+                with self.subTest(key=key, value_index=index):
+                    result = normalize_config({key: value})
+                    self.assertEqual(result, normalize_config(result))
+                    json.dumps(result, allow_nan=False)
+
     def test_configuration_is_portable_and_auto_transcription_is_opt_in(self):
         self.assertEqual(APP_DATA_DIR, PROJECT_ROOT / "config")
         self.assertEqual(CONFIG_FILE, PROJECT_ROOT / "config/settings.json")
@@ -143,12 +189,80 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(persisted["language"], "pl")
             self.assertEqual(load_config(path)["ai_cfg"], 3.5)
 
+    def test_malformed_enum_values_use_defaults_without_losing_valid_settings(self):
+        for key in ("theme", "preset_display_mode"):
+            for value in ([], {}, None, True, 123, "unknown"):
+                with self.subTest(key=key, value=value):
+                    result = normalize_config({key: value, "language": "pl", "ai_cfg": 3.5})
+                    self.assertEqual(result[key], DEFAULT_CONFIG[key])
+                    self.assertEqual(result["language"], "pl")
+                    self.assertEqual(result["ai_cfg"], 3.5)
+
+    def test_generation_languages_require_nonempty_strings(self):
+        for key in ("clone_lang", "design_lang", "auto_lang"):
+            for value in ([], {}, None, True, 123, "", "   "):
+                with self.subTest(key=key, value=value):
+                    self.assertEqual(normalize_config({key: value})[key], "Auto")
+            for value in ("Auto", "Polish", "pl", "English"):
+                with self.subTest(key=key, value=value):
+                    self.assertEqual(normalize_config({key: f" {value} "})[key], value)
+
+    def test_valid_enum_settings_are_preserved(self):
+        for key, choices in (
+            ("theme", ("light", "dark")),
+            ("preset_display_mode", ("name", "path", "name_path")),
+        ):
+            for value in choices:
+                with self.subTest(key=key, value=value):
+                    self.assertEqual(normalize_config({key: value})[key], value)
+
+    def test_nonfinite_or_overflowing_numbers_use_defaults(self):
+        for key in ("font_size", "ai_steps", "ai_cfg", "duration_val"):
+            for value in (10**1000, -(10**1000), float("nan"), float("inf"), "-Infinity"):
+                with self.subTest(key=key, value=value):
+                    self.assertEqual(normalize_config({key: value})[key], DEFAULT_CONFIG[key])
+
+    def test_valid_json_with_malformed_values_loads_and_preserves_other_settings(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "settings.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "theme": [],
+                        "preset_display_mode": {},
+                        "clone_lang": None,
+                        "design_lang": ["Polish"],
+                        "auto_lang": 123,
+                        "ai_steps": 10**1000,
+                        "ai_cfg": "NaN",
+                        "language": "pl",
+                        "hide_console": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = load_config(path)
+        for key in (
+            "theme",
+            "preset_display_mode",
+            "clone_lang",
+            "design_lang",
+            "auto_lang",
+            "ai_steps",
+            "ai_cfg",
+        ):
+            self.assertEqual(result[key], DEFAULT_CONFIG[key])
+        self.assertEqual(result["language"], "pl")
+        self.assertFalse(result["hide_console"])
+
     def test_broken_config_falls_back_to_defaults(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "settings.json"
-            path.write_text("not json", encoding="utf-8")
-            with self.assertLogs("omnisonic.config", level="WARNING"):
-                self.assertEqual(load_config(path), DEFAULT_CONFIG)
+            for payload in ("not json", "[1, 2]", "null", "123"):
+                with self.subTest(payload=payload):
+                    path.write_text(payload, encoding="utf-8")
+                    with self.assertLogs("omnisonic.config", level="WARNING"):
+                        self.assertEqual(load_config(path), DEFAULT_CONFIG)
 
     def test_shortcut_config_is_normalized_and_unknown_actions_are_removed(self):
         result = normalize_config(
@@ -276,6 +390,16 @@ class _FakeTorch:
 
 
 class AcceleratorTests(unittest.TestCase):
+    def test_copyable_diagnostics_include_model_loading_package_versions(self):
+        with patch(
+            "omnisonic.accelerator.importlib.metadata.version",
+            side_effect=lambda name: name + "-test",
+        ):
+            report = format_diagnostics("test-app", _FakeTorch())
+        for name in ("transformers", "huggingface-hub", "safetensors", "tokenizers"):
+            with self.subTest(name=name):
+                self.assertIn(f"{name}: {name}-test", report)
+
     def test_cuda_and_rocm_share_cuda_device_api_but_keep_distinct_backends(self):
         cuda = detect_accelerator(_FakeTorch(cuda="13.0"))
         rocm = detect_accelerator(_FakeTorch(hip="7.2.1"))

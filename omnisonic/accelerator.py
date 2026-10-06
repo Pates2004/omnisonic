@@ -212,6 +212,10 @@ def collect_diagnostics(app_version: str = "unknown", torch_module=None) -> dict
         "device_name": info.name,
         "torch_version": info.torch_version,
         "torchaudio_version": _package_version("torchaudio"),
+        "transformers_version": _package_version("transformers"),
+        "huggingface_hub_version": _package_version("huggingface-hub"),
+        "safetensors_version": _package_version("safetensors"),
+        "tokenizers_version": _package_version("tokenizers"),
         "cuda_version": _version_attribute(torch_module, "cuda"),
         "hip_version": _version_attribute(torch_module, "hip"),
         "xpu_available": bool(
@@ -233,6 +237,10 @@ def format_diagnostics(app_version: str = "unknown", torch_module=None) -> str:
         ("Device name", "device_name"),
         ("torch", "torch_version"),
         ("torchaudio", "torchaudio_version"),
+        ("transformers", "transformers_version"),
+        ("huggingface-hub", "huggingface_hub_version"),
+        ("safetensors", "safetensors_version"),
+        ("tokenizers", "tokenizers_version"),
         ("CUDA", "cuda_version"),
         ("HIP", "hip_version"),
         ("XPU available", "xpu_available"),
@@ -280,13 +288,14 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         payload = {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
         if args.json:
-            print(json.dumps(payload, ensure_ascii=False))
+            # PowerShell 5.1 decodes native stdout using a legacy code page.
+            print(json.dumps(payload, ensure_ascii=True))
         else:
             print(payload["error"], file=sys.stderr)
         return 1
 
     if args.json:
-        print(json.dumps(payload, ensure_ascii=False))
+        print(json.dumps(payload, ensure_ascii=True))
     else:
         print(format_diagnostics())
     return 0

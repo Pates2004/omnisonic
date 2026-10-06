@@ -9,6 +9,7 @@ class ModelLifecycle:
         self.model = None
         self.asr_pipe = None
         self.needs_collection = False
+        self._model_was_released = False
         self.sampling_rate = 24000
         self.asr_model_name = None
 
@@ -60,6 +61,7 @@ class ModelLifecycle:
             self.asr_pipe = getattr(self.model, "_asr_pipe", None)
             self.model._asr_pipe = None
             self.model = None
+            self._model_was_released = True
         self.needs_collection = True
 
     def run_transcription(self, state, settings, worker, *args):
@@ -90,8 +92,12 @@ class ModelLifecycle:
         self.release_asr()
 
     def collect_if_needed(self):
+        """Collect worker remnants and report an actual main-model release once."""
         # Called after the worker has returned and exception frames are cleared:
         # empty_cache alone cannot free tensors still referenced by a traceback.
         if self.needs_collection:
             self.collect()
             self.needs_collection = False
+        released = self._model_was_released
+        self._model_was_released = False
+        return released

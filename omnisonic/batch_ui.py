@@ -10,7 +10,7 @@ import wx
 
 from .batch import BatchInput, BatchInputError, BatchResult, discover_text_files, process_text_batch
 from .config import PRESETS_DIR, default_audio_directory
-from .validation import safe_child_path
+from .validation import operation_error_message, safe_child_path, validation_error_message
 
 
 class BatchTabMixin:
@@ -176,6 +176,8 @@ class BatchTabMixin:
         mode = self.batch_mode.GetSelection()
         languages = (self.clone_lang, self.design_lang, self.auto_lang)
         language = languages[mode].GetValue()
+        if not self._CheckTextNormalization(language):
+            return
         kwargs = {
             "generation_config": self.GetGenConfig(),
             "normalize_text": self.cfg.get("normalize_text", False),
@@ -194,9 +196,19 @@ class BatchTabMixin:
             )
             if preset:
                 try:
-                    prompt_source = (str(safe_child_path(PRESETS_DIR, preset)), None, None)
-                except ValueError as exc:
-                    wx.MessageBox(str(exc), self._("error_title"), parent=self)
+                    prompt_source = (
+                        str(safe_child_path(PRESETS_DIR, preset, reject_links=True)),
+                        None,
+                        None,
+                    )
+                except (OSError, ValueError) as exc:
+                    wx.MessageBox(
+                        self._("preset_access_failed").format(
+                            error=validation_error_message(exc, self._)
+                        ),
+                        self._("error_title"),
+                        parent=self,
+                    )
                     return
             else:
                 reference = self.clone_ref_audio.GetValue().strip()
@@ -258,7 +270,9 @@ class BatchTabMixin:
         if prompt_source:
             preset, reference, text = prompt_source
             kwargs["voice_clone_prompt"] = (
-                VoiceClonePrompt.load(preset)
+                VoiceClonePrompt.load(
+                    str(safe_child_path(PRESETS_DIR, Path(preset).name, reject_links=True))
+                )
                 if preset
                 else model.create_voice_clone_prompt(
                     ref_audio=reference,
@@ -270,7 +284,13 @@ class BatchTabMixin:
 
         def synthesize(text):
             state.check_cancelled()
-            audio = np.asarray(model.generate(text=text, **kwargs)[0])
+            try:
+                audio = np.asarray(model.generate(text=text, **kwargs)[0])
+            except Exception as exc:
+                message = operation_error_message(exc, self._)
+                if message == str(exc):
+                    raise
+                raise ValueError(message) from exc
             if audio.ndim != 1 or not audio.size or not np.isfinite(audio).all():
                 raise ValueError(self._("invalid_generated_audio"))
             return audio

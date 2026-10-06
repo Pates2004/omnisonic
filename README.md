@@ -66,6 +66,38 @@ error was a launcher bootstrap bug, not a missing HIP SDK. Updating the launcher
 and retrying `start_desktop.bat -Mode Portable` repairs an incomplete installation;
 there is no need to delete the whole application or replace a working system-Python setup.
 
+The launcher isolates Python path/startup settings for its child processes, but
+preserves pip proxy, certificate, index and security policies. It rejects pip
+settings that redirect installation or select another interpreter, with an
+actionable error instead of rebuilding the GPU runtime. If your pip policy
+requires a virtual environment, use `-Mode System` with a compatible installed
+Python or consult the person responsible for that policy; standalone portable
+Python is not a venv, and the launcher does not silently disable this requirement.
+
+After activating or relocating a managed environment, generated Python entry
+points (including `pip.exe` and ROCm's `offload-arch.exe`) are checked and repaired
+before accelerator validation. Only recognized package-owned wrappers and their
+installation records are updated; native tools and the base system Python are
+not rewritten. A successful check is remembered for that runtime path and helper
+version, so a normal unchanged start does not rescan every installed file.
+This is not a general-purpose environment packer: a system venv still needs its
+base Python, and editable-package hooks can still refer to the original project
+folder. Use `start_desktop.bat` and transfer user data with Power Switch rather
+than assuming every installed console command is portable between computers.
+
+Po polsku: launcher izoluje ścieżki i ustawienia startowe Pythona, ale zachowuje
+zasady pip dotyczące sieci, certyfikatów i bezpieczeństwa. Ustawienia pip kierujące
+instalację do innego katalogu lub Pythona powodują czytelny błąd, nie ponowną
+instalację GPU. Jeśli pip wymaga venv, wybierz `-Mode System` ze zgodnym Pythonem
+albo uzgodnij zmianę tej zasady; samodzielny Python portable nie jest venv.
+Po zmianie lokalizacji środowiska launcher naprawia rozpoznane pliki uruchamiające
+pakiety, w tym `pip.exe` i `offload-arch.exe`, przed testem GPU. Nie zmienia przy
+tym systemowego Pythona. Wynik kontroli zapamiętuje, aby nie powtarzać pełnego
+skanowania przy każdym starcie. To nie czyni dowolnego venv przenośnym między
+komputerami: nadal potrzebuje on bazowego Pythona, a instalacja edytowalna może
+odwoływać się do dawnego katalogu źródeł. Używaj `start_desktop.bat`; do przenoszenia
+danych użytkownika służy Power Switch.
+
 Regular launches check hardware, declared package versions, and a real accelerator
 operation, but no longer import the entire application and run `pip check` before
 starting it a second time. Full validation runs during installation, with
@@ -83,6 +115,17 @@ Runtime replacement is transactional. The launcher prepares and validates
 `env.new/` or `venv.new/` before activating it, and keeps the previously working
 runtime as `env.old/` or `venv.old/`. A failed staging install never replaces the
 active environment.
+If a previous activation was interrupted between renames, the surviving `.old`
+environment is retained for recovery rather than deleted. An unavailable or broken
+system Python is treated as a repairable interpreter failure, not a fatal probe error.
+Before modifying a runtime, OmniSonic checks whether another process is using
+it and asks you to close that process. This also covers hidden desktop windows;
+ordinary launches with an already valid runtime remain available.
+
+A per-project lock prevents simultaneous launchers from modifying the same
+runtime during preparation and startup. A second launcher reports that the
+project is busy; it does not delete another launcher's staging environment.
+The visible, foreground launcher retains this lock until the application exits.
 
 The mode can be changed explicitly with `start_desktop.bat -Mode Portable` or
 `start_desktop.bat -Mode System`. `start_desktop.bat -InstallOnly` installs and
@@ -118,8 +161,26 @@ displays a standard Windows error dialog. The console stays available during
 first-time installation and reappears if environment repair fails. Restart
 OmniSonic after changing this option.
 
+If loading the AI model reports only `[Errno 2] No such file or directory`, the
+short message does not identify the missing file. After reproducing the problem,
+include the latest `Traceback (most recent call last)` block through the final
+exception from `Workspace/launcher-logs/desktop-startup.log`, plus **Copy
+diagnostics**. That log is written for hidden launcher starts; a visible/direct
+start may instead print the traceback in its console. Installation validation
+checks the runtime, not every model file subsequently fetched through Hugging
+Face. Do not delete presets, settings or the model cache based only on this
+generic error. Logs can contain local paths; review the excerpt before sharing.
+
+Jeśli ładowanie modelu kończy się samym `[Errno 2] No such file or directory`,
+prześlij ostatni fragment od `Traceback (most recent call last)` do końca wyjątku
+z `Workspace/launcher-logs/desktop-startup.log` oraz wynik **Kopiuj diagnostykę**.
+Ten log powstaje przy uruchamianiu z ukrytą konsolą; przy starcie bezpośrednim lub
+z widoczną konsolą pełny błąd może być wypisany tylko w niej. Sam komunikat nie
+uzasadnia usuwania środowiska, presetów ani pobranych modeli. Przed udostępnieniem
+sprawdź fragment logu — może zawierać lokalne ścieżki.
+
 The **System** settings tab shows the active backend, device, PyTorch/TorchAudio
-versions, CUDA/HIP/XPU state, Python, OS, and RAM. **Copy diagnostics** places a
+versions, model-loading library versions, CUDA/HIP/XPU state, Python, OS, and RAM. **Copy diagnostics** places a
 report suitable for a bug submission on the clipboard.
 
 Keyboard shortcuts can be edited on the **Keyboard shortcuts** settings tab.
@@ -135,6 +196,9 @@ The **Appearance** tab previews the light and dark palettes immediately. The
 chosen theme also colours the app's own settings, preset, shortcut and progress
 windows. Native Windows file pickers and system message boxes continue to use
 the operating system's appearance.
+Changing preset display labels applies immediately and keeps the selected
+cloning preset. Refreshing the list or adding another preset no longer resets
+that selection; removing the selected preset returns to the new-audio option.
 
 Manual setup:
 
@@ -304,11 +368,49 @@ can be entered directly or selected with **Browse** in settings. The related
 checkbox chooses between saving directly to that configured folder and asking
 for a destination each time.
 
+Microphone capture uses the device's native/default sample rate; the engine
+resamples reference audio when needed. If recording or saving fails after samples
+have been captured, they stay in memory: **Retry saving recording** (also Ctrl+R)
+opens Save As. Cancelling or failing that retry keeps the samples. Closing the
+program with an active or unsaved recording always asks before discarding it.
+Recording and model operations cannot run simultaneously in the same window.
+Each application session has its own temporary reference WAV, so another open
+instance cannot overwrite or remove it. Temporary files from previous sessions
+are not silently removed by the current one.
+
 WAV files and presets are staged in unique temporary files beside their destination.
 A failed or cancelled write does not replace an existing file. Automatic WAV
 names are reserved before writing so separate application instances cannot pick
 the same unused name. Manual Save As still opens if the configured output folder
 is unavailable, allowing another location to be chosen.
+
+Preset files are checked before inference, including token types, codebook count
+and model vocabulary bounds. Invalid generated samples are rejected before audio
+postprocessing can disguise NaN or infinite values as a successful recording.
+Preset symbolic links and junctions are not accepted; copy the actual preset file
+into the program's `presets` folder. Ordinary readable cloud placeholders are not
+treated as links when scanning input folders. Partially failed preset deletion
+refreshes both lists to reflect the files that remain.
+
+### Text normalization
+
+The optional **Normalize numbers in text** setting includes lightweight
+`num2words` integer conversion, including Polish and English. Select an explicit
+language in the voice tab; Auto is rejected for this option so Polish numbers
+cannot accidentally be normalized using the engine's English heuristic. The
+same check applies to every batch mode, without discarding previous audio.
+
+The basic converter preserves decimals, dates, times, identifiers and inline
+voice/pronunciation tags instead of reading their digit fragments as integers.
+It is not a full grammar-aware normalizer. Unsupported languages and missing
+dependencies produce an explicit error. Optional WeText normalization remains
+available for English/Chinese when its native dependencies are installed;
+the Windows launcher does not install that native stack automatically. With
+normalization disabled, language selection and generation are unchanged.
+
+CFG zero is accepted as the engine's no-guidance setting. Extreme generation
+settings can produce poor or silent audio; silence-only results that become
+empty during postprocessing are reported as errors, not saved as success.
 
 ## Development
 
@@ -342,6 +444,30 @@ without replacing the application's `venv/`, `config/`, or presets.
 dialogs and stale callbacks. `tests/test_demo_reference.py` covers web clone
 options, error reporting, PCM clipping and long-reference Whisper calls without
 loading model weights. These regressions also run in CI.
+
+`tests/test_inference_validation.py` covers malformed presets and decoded audio;
+`tests/test_playback.py` covers pause/resume timing independently of the system
+clock. `tests/test_ui_preferences.py` covers shortcut capture and localized input
+validation. Optional `python -m tests.smoke_frame_lifecycle` and
+`python -m tests.smoke_dialog_lifecycle` exercise actual wx modal/timer lifecycles
+without loading a model or altering user settings.
+
+`powershell -NoProfile -ExecutionPolicy Bypass -File tests/smoke_runtime_in_use.ps1`
+optionally verifies protection against replacing an environment whose Python is
+actually running. It starts short-lived hidden helpers and does not modify the
+machine execution policy or replace the environments.
+
+`python -B -m tests.smoke_normalization_ui` verifies real wx controls, Polish and
+English messages, explicit-language checks, conversion and batch WAV writing
+using synthetic synthesis. It requires the runtime dependencies but no model.
+For cached-model synthesis plus normalization, zero-CFG raw decoding, disabled
+chunking and two-reference pairing on a real device, use:
+
+```powershell
+python -B -m tests.smoke_inference --backend rocm --output Workspace/input-smoke --regression-inputs
+```
+
+Choose a new output directory for each test.
 
 Optional real-device web regression (use a reference longer than 30 seconds):
 

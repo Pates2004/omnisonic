@@ -170,8 +170,57 @@ def main():
                 assert editor.ref_text_ctrl.GetValue() == "Old transcript."
             finally:
                 editor.Destroy()
+            for name in ("Alpha.pt", "Bravo.pt"):
+                (desktop.PRESETS_DIR / name).touch()
+            frame.RefreshPresets()
+            frame.combo_presets.SetSelection(2)
+            frame.list_presets.SetSelection(1)
+            frame.RefreshPresets()
+            selected = frame.combo_presets.GetSelection()
+            assert frame.combo_presets.GetClientData(selected) == "Bravo.pt"
+
+            original_show_modal = desktop.SettingsDialog.ShowModal
+
+            def change_preset_display(settings):
+                settings.cb_preset_disp.SetSelection(1)
+                wx.CallLater(100, settings.OnSave, None)
+                return original_show_modal(settings)
+
+            with patch.object(desktop.SettingsDialog, "ShowModal", change_preset_display):
+                frame.OnOpenSettings(None)
+            selected = frame.combo_presets.GetSelection()
+            assert frame.combo_presets.GetClientData(selected) == "Bravo.pt"
+            assert frame.combo_presets.GetString(selected) == str(desktop.PRESETS_DIR / "Bravo.pt")
+            assert load_config(CONFIG_FILE)["preset_display_mode"] == "path"
+
+            frame.spin_steps.SetValue(47)
+            original_settings = deepcopy(frame.cfg)
+            persisted_settings = CONFIG_FILE.read_bytes()
+
+            def reset_ai_and_save(settings):
+                with patch.object(wx, "MessageBox", return_value=wx.YES):
+                    settings.OnResetAI(None)
+                assert frame.spin_steps.GetValue() == 32
+                wx.CallLater(100, settings.OnSave, None)
+                return original_show_modal(settings)
+
+            with (
+                patch.object(desktop.SettingsDialog, "ShowModal", reset_ai_and_save),
+                patch.object(
+                    desktop, "SaveBasicConfig", side_effect=PermissionError("read-only settings")
+                ),
+            ):
+                frame.OnOpenSettings(None)
+            assert frame.spin_steps.GetValue() == 47, "Failed settings save retained reset preview"
+            assert frame.cfg == original_settings
+            assert CONFIG_FILE.read_bytes() == persisted_settings
+            (desktop.PRESETS_DIR / "Alpha.pt").unlink()
+            frame.RefreshPresets()
+            assert (
+                frame.combo_presets.GetClientData(frame.combo_presets.GetSelection()) == "Bravo.pt"
+            )
             print(
-                "Reference auto/manual ASR, stale results, edits, errors, cancellation and portable settings: OK"
+                "Reference ASR, errors/cancellation, portable settings and preset selection/display: OK"
             )
         finally:
             model.release.set()

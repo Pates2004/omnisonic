@@ -187,6 +187,56 @@ class ModelLifecycleTests(unittest.TestCase):
         self.runtime.collect_if_needed()
         self.assertTrue(all(ref() is None for ref in self.loaded + self.pipelines))
 
+    def test_empty_runtime_cleanup_does_not_report_model_release(self):
+        self.runtime.release_all()
+        self.assertTrue(self.runtime.needs_collection)
+        self.assertIs(self.runtime.collect_if_needed(), False)
+
+    def test_actual_model_release_is_reported_once_after_collection(self):
+        self.perform({})
+        self.runtime.release_all()
+        self.assertIs(self.runtime.collect_if_needed(), True)
+        self.assertIs(self.runtime.collect_if_needed(), False)
+
+    def test_asr_only_release_does_not_report_synthesis_model_release(self):
+        self.perform({}, transcription=True)
+        self.runtime.release_asr()
+        self.assertIs(self.runtime.collect_if_needed(), False)
+
+    def test_failed_model_load_does_not_log_successful_unload_in_gui(self):
+        from omnisonic.validation import operation_error_message
+
+        self.runtime.factory = Mock(side_effect=FileNotFoundError(2, "No such file or directory"))
+        tree = ast.parse((ROOT / "omnisonic/app.py").read_text(encoding="utf-8"))
+        names = {"_EnsureModelWorker", "_complete_operation"}
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name in names
+        ]
+        wx = Mock(OK=1, ICON_ERROR=2)
+        namespace = {"wx": wx, "operation_error_message": operation_error_message}
+        exec(
+            compile(ast.Module(body=methods, type_ignores=[]), "startup-handlers", "exec"),
+            namespace,
+        )
+        frame = SimpleNamespace(
+            _models=self.runtime,
+            model=None,
+            btn_toggle_model=Mock(),
+            Log=Mock(),
+            _=lambda key: key,
+            _MaybeAutoTranscribeReference=Mock(),
+        )
+        with self.assertLogs("omnisonic.operations", level="ERROR"):
+            state = execute_worker(
+                OperationState(), namespace["_EnsureModelWorker"].__get__(frame), {}
+            )
+        namespace["_complete_operation"](frame, state, None)
+        self.assertIsInstance(state.error, FileNotFoundError)
+        frame.Log.assert_called_once_with("msg_error[Errno 2] No such file or directory")
+        wx.MessageBox.assert_called_once()
+
     def test_tokenizer_lru_cache_cannot_retain_released_model_weights(self):
         class Tokenizer:
             @lru_cache  # noqa: B019 - deliberately reproduce the upstream retention bug

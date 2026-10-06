@@ -4,6 +4,12 @@ title OmniSonic
 color 0b
 
 cd /d "%~dp0"
+if errorlevel 1 (
+    echo [ERROR] Cannot access the program folder. Move OmniSonic to an accessible local folder.
+    echo [ERROR] Nie mozna otworzyc folderu programu. Przenies OmniSonic do dostepnego folderu lokalnego.
+    pause
+    exit /b 1
+)
 
 if not exist "desktop_launcher.ps1" (
     echo [ERROR] Missing desktop_launcher.ps1.
@@ -14,9 +20,10 @@ if not exist "desktop_launcher.ps1" (
 
 if not "%~1"=="" goto visible_launch
 set "OMNISONIC_LAUNCH_STYLE="
-for /f "delims=" %%H in ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0desktop_launcher.ps1" -QueryHiddenLaunch') do set "OMNISONIC_LAUNCH_STYLE=%%H"
+rem A fixed relative path avoids a second expansion of literal %% characters by FOR /F.
+for /f "delims=" %%H in ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ".\desktop_launcher.ps1" -QueryHiddenLaunch') do set "OMNISONIC_LAUNCH_STYLE=%%H"
 if /i not "%OMNISONIC_LAUNCH_STYLE%"=="HIDE" goto visible_launch
-start "" powershell.exe -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%~dp0desktop_launcher.ps1"
+start "" powershell.exe -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%~dp0desktop_launcher.ps1" -HiddenLaunch
 if not errorlevel 1 exit /b 0
 
 :visible_launch

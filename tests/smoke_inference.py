@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", choices=("cuda", "rocm", "xpu", "cpu"), required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--regression-inputs", action="store_true")
     args = parser.parse_args()
     os.environ["HF_HUB_OFFLINE"] = "1"
 
@@ -21,7 +24,7 @@ def main():
     from omnisonic.accelerator import preferred_dtype, validate_accelerator
     from omnisonic.batch import BatchInput, process_text_batch
     from omnisonic.operations import OperationState
-    from omnivoice import OmniVoice, VoiceClonePrompt
+    from omnivoice import OmniVoice, OmniVoiceGenerationConfig, VoiceClonePrompt
 
     accelerator = validate_accelerator(args.backend)
     model = OmniVoice.from_pretrained(
@@ -67,6 +70,77 @@ def main():
     assert all(sf.info(item.output).frames > 0 for item in results)
     print(f"Real {accelerator.backend} inference, portable preset save/load and cloning: OK")
     print("Real two-file batch synthesis: OK")
+
+    if args.regression_inputs:
+        from omnivoice.utils.text import normalize_text
+
+        # A low threshold would select chunking if duration=0 were ignored.
+        with patch.object(
+            model, "_generate_chunked", side_effect=AssertionError("Chunking was not disabled")
+        ):
+            normalized = model.generate(
+                text="Mam 12 jabłek.",
+                language="pl",
+                normalize_text=True,
+                speed=None,
+                generation_config=OmniVoiceGenerationConfig(
+                    audio_chunk_duration=0.0, audio_chunk_threshold=0.01
+                ),
+            )[0]
+        assert normalized.size > 0 and np.isfinite(normalized).all()
+        sf.write(args.output / "normalized.wav", normalized, model.sampling_rate)
+        # CFG=0 is a valid no-guidance mode but can produce near-silence. Verify
+        # raw decoding separately: silence trimming may correctly reject it.
+        cfg_zero = model.generate(
+            text=sentence,
+            language="en",
+            voice_clone_prompt=restored,
+            generation_config=OmniVoiceGenerationConfig(
+                guidance_scale=0.0, audio_chunk_duration=0.0, postprocess_output=False
+            ),
+        )[0]
+        assert cfg_zero.size > 0 and np.isfinite(cfg_zero).all()
+        sf.write(args.output / "cfg-zero-raw.wav", cfg_zero, model.sampling_rate)
+        reference_paths = [str(args.output / "generated.wav"), str(args.output / "cloned.wav")]
+        transcripts = [sentence, "The saved voice works after loading the preset."]
+        with patch.object(
+            model, "create_voice_clone_prompt", wraps=model.create_voice_clone_prompt
+        ) as create_prompt:
+            paired = model.generate(
+                text=["The first reference voice.", "The second reference voice."],
+                language="en",
+                ref_audio=reference_paths,
+                ref_text=transcripts,
+                speed=[None, 1.0],
+                audio_chunk_duration=0.0,
+            )
+        assert len(paired) == 2
+        assert [
+            call.kwargs["ref_audio"] for call in create_prompt.call_args_list
+        ] == reference_paths
+        assert [call.kwargs["ref_text"] for call in create_prompt.call_args_list] == transcripts
+        for index, audio in enumerate(paired):
+            assert audio.size > 0 and np.isfinite(audio).all()
+            sf.write(args.output / f"paired-reference-{index}.wav", audio, model.sampling_rate)
+        (args.output / "regression-inputs.json").write_text(
+            json.dumps(
+                {
+                    "backend": accelerator.backend,
+                    "device": accelerator.name,
+                    "torch": torch.__version__,
+                    "normalized_polish": normalize_text("Mam 12 jabłek.", language="pl"),
+                    "cfg_zero_raw_decoding": "passed",
+                    "cfg_zero_rms": float(np.sqrt(np.mean(np.square(cfg_zero)))),
+                    "disabled_chunking": "passed",
+                    "optional_speed": "passed",
+                    "paired_references": "passed",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print("Real normalization, CFG zero, disabled chunking and paired references: OK")
 
 
 if __name__ == "__main__":

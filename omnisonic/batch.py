@@ -6,13 +6,13 @@ import codecs
 import json
 import os
 import re
-import stat
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
 from .operations import OperationCancelled, OperationState
+from .validation import is_path_link
 
 
 TEXT_EXTENSIONS = {".txt", ".md"}
@@ -31,10 +31,7 @@ class BatchInput:
 
 
 def _is_link(path: Path) -> bool:
-    info = path.lstat()
-    return stat.S_ISLNK(info.st_mode) or bool(
-        getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    )
+    return is_path_link(path)
 
 
 def discover_text_files(
