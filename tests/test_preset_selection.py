@@ -58,7 +58,9 @@ class PresetRefreshTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="omnisonic-preset-selection-")
         self.addCleanup(temporary.cleanup)
-        self.directory = Path(temporary.name)
+        temporary_path = Path(temporary.name)
+        # Exercise canonicalization even when Windows does not use a short-name alias.
+        self.directory = temporary_path / ".." / temporary_path.name
         for name in ("Alpha.pt", "Bravo.pt"):
             (self.directory / name).touch()
         self.frame = SimpleNamespace(
@@ -111,7 +113,9 @@ class PresetRefreshTests(unittest.TestCase):
         self.frame.cfg["preset_display_mode"] = "path"
         self.frame.RefreshPresets()
         self.assertEqual(self.selected(), "Bravo.pt")
-        self.assertEqual(self.frame.combo_presets.items[2][0], str(self.directory / "Bravo.pt"))
+        self.assertEqual(
+            self.frame.combo_presets.items[2][0], str((self.directory / "Bravo.pt").resolve())
+        )
 
 
 class PresetDisplaySettingsTests(unittest.TestCase):
