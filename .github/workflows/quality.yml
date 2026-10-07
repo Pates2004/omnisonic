@@ -28,6 +28,8 @@ jobs:
         run: python -m unittest -v tests.test_desktop_logic tests.test_runtime_requirements tests.test_batch tests.test_reference_audio tests.test_model_lifecycle tests.test_operation_dispatch tests.test_preset_selection tests.test_preset_file_safety tests.test_playback tests.test_numeric_controls tests.test_ui_preferences tests.test_normalization_ui tests.test_generation_inputs tests.test_text_normalization tests.test_inference_validation tests.test_demo_reference tests.test_file_safety tests.test_startup
       - name: Test transactional runtime entry-point repair
         run: python -m unittest -v tests.test_installer_runtime
+      - name: Test generation seeds and reference prompt reuse
+        run: python -m unittest -v tests.test_randomness tests.test_prompt_cache tests.test_generation_seed_ui tests.test_reference_cache_ui tests.test_output_paths
       - name: Parse and self-test the desktop launcher
         shell: powershell
         run: |

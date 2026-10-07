@@ -331,5 +331,8 @@
     "batch_limit": "The queue is limited to 5000 files. Add fewer files at once.",
     "batch_too_large": "The text file exceeds the 5 MiB limit.",
     "batch_empty_file": "The text file is empty.",
-    "batch_encoding_error": "Cannot read text. Save the file as UTF-8 or UTF-16 with BOM."
+    "batch_encoding_error": "Cannot read text. Save the file as UTF-8 or UTF-16 with BOM.",
+    "use_fixed_seed": "Use a fixed random seed",
+    "seed_value": "Random seed (0–2147483647)",
+    "folder_path_invalid": "The output folder path is invalid. Check for unmatched or misplaced quotation marks."
 }

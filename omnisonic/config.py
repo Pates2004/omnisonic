@@ -93,6 +93,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ai_steps": 32,
     "ai_cfg": 2.0,
     "ai_speed": 1.0,
+    "use_fixed_seed": False,
+    "ai_seed": 0,
     "ai_denoise": True,
     "ai_t_shift": 0.1,
     "ai_layer_penalty_factor": 5.0,
@@ -160,6 +162,9 @@ def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     result["ai_steps"] = int(_clamp_number(result.get("ai_steps"), 32, 1, 100))
     result["ai_cfg"] = _clamp_number(result.get("ai_cfg"), 2.0, 0.0, 10.0)
     result["ai_speed"] = _clamp_number(result.get("ai_speed"), 1.0, 0.1, 5.0)
+    seed = result.get("ai_seed")
+    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 2147483647:
+        result["ai_seed"] = 0
     result["ai_t_shift"] = _clamp_number(result.get("ai_t_shift"), 0.1, 0.001, 10.0)
     result["ai_layer_penalty_factor"] = _clamp_number(
         result.get("ai_layer_penalty_factor"), 5.0, 0.0, 100.0

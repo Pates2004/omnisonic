@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from omnisonic.i18n import load_locales, translate
+from omnisonic.randomness import seeded_generation
 from omnisonic.validation import operation_error_message
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,7 +60,11 @@ class NormalizationUITests(unittest.TestCase):
             for node in ast.walk(tree)
             if isinstance(node, ast.FunctionDef) and node.name == name
         )
-        namespace = {"wx": self.wx, "operation_error_message": operation_error_message}
+        namespace = {
+            "wx": self.wx,
+            "operation_error_message": operation_error_message,
+            "seeded_generation": seeded_generation,
+        }
         namespace.update(extra_namespace)
         exec(compile(ast.Module(body=[node], type_ignores=[]), filename, "exec"), namespace)
         return namespace[name]

@@ -37,6 +37,7 @@ def main():
 
     class Model:
         sampling_rate = 24000
+        device = "cpu"
 
         def generate(self, **kwargs):
             assert kwargs["text"] in {"First sentence.", "Second sentence."}
@@ -97,6 +98,8 @@ def main():
         active_output = scratch / "changed-before-start"
         next_output = scratch / "changed-while-processing"
         change_output_setting(active_output)
+        # Windows Copy as path includes quotes; they must not enter the filename.
+        frame.batch_output.SetValue(f'"{active_output}"')
         with patch.object(wx, "MessageBox", return_value=wx.OK):
             frame.OnShortcutGenerate(None)
             # Cold imports of the inference libraries can take longer than synthesis.
@@ -112,6 +115,7 @@ def main():
         assert len(report["files"]) == 2
         assert all(Path(item["output"]).is_file() for item in report["files"])
         assert all(Path(item["output"]).parent == reports[0].parent for item in report["files"])
+        assert [Path(item["output"]).name for item in report["files"]] == ["one.wav", "two.wav"]
         frame.batch_list.Select(0)
         frame.OnBatchRemove(None)
         assert len(frame.batch_items) == 1

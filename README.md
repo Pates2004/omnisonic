@@ -16,10 +16,42 @@ microphone recording, reusable private presets, and Polish/English interfaces.
 - a dedicated preset manager with create, rename, rebuild, and delete actions;
 - portable voice presets stored in the application's ignored `presets/` directory;
 - full access to OmniVoice's generation and long-form audio parameters;
+- optional fixed random seeds and in-memory reuse of an unchanged voice reference;
 - lazy ASR loading to reduce startup time and memory use;
 - Polish and English localization.
 
-## Wymagania / Requirements
+## Powtarzalność generacji / Generation repeatability
+
+In **Advanced**, **Use a fixed random seed** lets you repeat the same generation
+settings with a seed from 0 to 2147483647. It is off by default. The setting
+applies to cloning, design, automatic generation, and separately to every batch
+item, so queue order or retrying an item does not change its initial random seed.
+Different devices, PyTorch/model versions, and nondeterministic kernels can still
+produce different results. The setting follows **Remember AI settings**; resetting
+AI settings switches it off. The application restores the previous random-number
+generator states after each fixed-seed generation, including on error.
+
+W zakładce **Zaawansowane** można włączyć stałe ziarno losowania (0–2147483647).
+Domyślnie jest wyłączone. Dotyczy klonowania, projektowania, trybu automatycznego
+i każdej pozycji kolejki osobno; kolejność plików i ponowienie pozycji nie zmieniają
+jej ziarna. Identyczny wynik nie jest gwarantowany między różnym sprzętem,
+wersjami modelu/PyTorcha ani przy niedeterministycznych operacjach. Ziarno podlega
+opcji zapamiętywania ustawień AI; reset ustawień AI wyłącza stałe ziarno.
+
+Consecutive generations from the same reference file can reuse its encoded
+prompt. Only one detached CPU copy is kept in memory, never on disk. Changed
+file contents, transcript, preprocessing or ASR/model settings invalidate it;
+unloading the synthesis model or a failed/cancelled operation clears it.
+Presets remain a separate, explicitly saved feature.
+
+Przy kolejnych generacjach z tego samego pliku referencyjnego program może ponownie
+użyć jego zakodowanej referencji. Przechowuje tylko jeden wpis w pamięci RAM, bez
+zapisu na dysk i bez przetrzymywania modelu lub pamięci GPU. Zmiana treści pliku,
+transkrypcji, przetwarzania wstępnego lub ustawień modeli unieważnia wpis.
+Zwolnienie modelu albo nieudana/anulowana operacja również go czyści. Presety
+nadal są zapisywane wyłącznie na wyraźne polecenie użytkownika.
+
+## Wymagania sprzętowe / System requirements
 
 - Windows 10 or newer;
 - Windows PowerShell 5.1 (included with supported Windows versions);
@@ -237,7 +269,9 @@ for each file; use a cloned preset when speaker consistency is required.
 sequence, keeping GPU memory use bounded. Each input produces a separate WAV
 inside a new batch subfolder of the chosen output directory, along with
 `batch_report.json`. Matching names from different folders do not overwrite one
-another. This explicit batch destination bypasses the single-file save prompts.
+another. Output files retain input basenames: `sentence.txt` becomes `sentence.wav`.
+Only collisions add a suffix, such as `sentence (2).wav`; there is no automatic
+number prefix. This explicit batch destination bypasses the single-file save prompts.
 Saving a new generated-audio directory in Settings immediately updates the batch
 destination, without restarting the app. Unrelated settings leave a manually
 chosen batch directory unchanged. A running batch keeps its original destination;
@@ -254,7 +288,18 @@ Only folders containing queued text files are recreated; empty folders and
 unrelated files are not copied. **Include subfolders** controls scanning, while
 this new checkbox controls output layout and can be changed after scanning.
 Both options are on by default. Disabling **Preserve input folder structure**
-restores the flat, numbered output layout without excluding subfolder inputs.
+uses a flat output layout without excluding subfolder inputs or changing their
+basenames. Folder paths pasted using Windows **Copy as path** may include a pair
+of surrounding double quotes; the app removes that wrapper in both Settings and
+the batch destination. Unmatched quotation marks are reported before generation.
+
+Nazwy wyników odpowiadają plikom wejściowym: `zdanie.txt` daje `zdanie.wav`, także
+bez zachowywania struktury folderów. Tylko kolizje wymagają dopisku, np.
+`zdanie (2).wav`. Wyłączenie struktury nie wyłącza przeszukiwania podfolderów.
+Można wkleić folder skopiowany z Windows opcją **Kopiuj jako ścieżkę** — para
+cudzysłowów otaczających ścieżkę jest usuwana. Dotyczy to trybu masowego oraz
+folderów nagrań i wygenerowanego audio w ustawieniach. Niedomknięte cudzysłowy
+są zgłaszane przed rozpoczęciem generowania.
 
 Bad files are reported and remaining files continue. Cancellation waits for the
 current model call and keeps completed recordings. Retrying skips completed

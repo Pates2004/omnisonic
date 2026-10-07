@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, Mock
 
 from omnisonic.config import DEFAULT_CONFIG, normalize_config
 from omnisonic.model_lifecycle import ModelLifecycle
-from omnisonic.operations import OperationState, execute_worker
+from omnisonic.operations import OperationCancelled, OperationState, execute_worker
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -129,6 +129,69 @@ class ModelLifecycleTests(unittest.TestCase):
         self.assertEqual(len(result.result), 3)
         self.assertEqual(len(self.loaded), 1)
         self.assertIsNone(self.loaded[0]())
+
+    def test_reference_prompt_forwards_model_and_asr_identity(self):
+        self.runtime._reference_cache = Mock()
+        state = OperationState()
+        model = self.runtime.ensure(state, {"asr_model_name": "selected-asr"})
+        result = self.runtime.reference_prompt(state, model, "reference.wav", None, False)
+        self.runtime._reference_cache.get_or_create.assert_called_once_with(
+            state,
+            model,
+            "reference.wav",
+            None,
+            False,
+            asr_identity=("selected-asr", "whisper-test", "None"),
+        )
+        self.assertIs(result, self.runtime._reference_cache.get_or_create.return_value)
+
+    def test_reference_cache_clears_when_asr_configuration_changes(self):
+        self.runtime._reference_cache = Mock()
+        self.runtime.ensure(OperationState(), {"asr_model_name": "first"})
+        self.runtime.configure_asr({"asr_model_name": "first"})
+        self.runtime._reference_cache.reset_mock()
+        self.runtime.configure_asr({"asr_model_name": "first"})
+        self.runtime._reference_cache.clear.assert_not_called()
+        self.runtime.configure_asr({"asr_model_name": "second"})
+        self.runtime._reference_cache.clear.assert_called()
+
+    def test_reference_cache_survives_success_but_not_failure_or_cancellation(self):
+        self.runtime._reference_cache = Mock()
+        state = OperationState()
+        self.assertEqual(self.runtime.run(state, {}, lambda state, model: "done"), "done")
+        self.runtime._reference_cache.clear.assert_not_called()
+        with self.assertRaisesRegex(RuntimeError, "generation failed"):
+            self.runtime.run(state, {}, Mock(side_effect=RuntimeError("generation failed")))
+        self.runtime._reference_cache.clear.assert_called_once()
+        self.runtime._reference_cache.reset_mock()
+
+        def late_cancel(state, model):
+            state.request_cancel()
+            return "discarded"
+
+        with self.assertRaises(OperationCancelled):
+            self.runtime.run(state, {}, late_cancel)
+        self.runtime._reference_cache.clear.assert_called_once()
+
+    def test_reference_cache_is_cleared_on_model_release_including_empty_runtime(self):
+        self.runtime._reference_cache = Mock()
+        self.runtime.release_model()
+        self.runtime._reference_cache.clear.assert_called_once()
+        self.runtime._reference_cache.reset_mock()
+        self.runtime.run(
+            OperationState(), {"unload_omnivoice_after_operation": True}, lambda state, model: None
+        )
+        self.runtime._reference_cache.clear.assert_called_once()
+        self.runtime._reference_cache.reset_mock()
+        self.runtime.release_all()
+        self.runtime._reference_cache.clear.assert_called_once()
+
+    def test_asr_memory_unload_does_not_invalidate_unchanged_reference(self):
+        self.runtime._reference_cache = Mock()
+        self.runtime.run(
+            OperationState(), {"unload_asr_after_transcription": True}, lambda state, model: None
+        )
+        self.runtime._reference_cache.clear.assert_not_called()
 
     def test_errors_and_cancellation_do_not_retain_model_in_tracebacks(self):
         for fail in (False, True):

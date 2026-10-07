@@ -16,6 +16,7 @@ import numpy as np
 from omnisonic.files import atomic_write, write_numbered_audio
 from omnisonic.operations import OperationState
 from omnisonic.validation import (
+    output_directory_path,
     safe_child_path,
     validate_filename_component,
     validation_error_message,
@@ -25,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def app_methods(names, namespace):
+    namespace.setdefault("output_directory_path", output_directory_path)
     tree = ast.parse((ROOT / "omnisonic/app.py").read_text(encoding="utf-8"))
     methods = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name in names]
     for method in methods:
@@ -171,10 +173,43 @@ class FileSafetyTests(unittest.TestCase):
         self.assertEqual(result, str(destination))
         self.assertEqual(destination.read_bytes(), b"audio")
         self.assertEqual(configured.read_bytes(), b"not a folder")
+        frame.cfg["generated_audio_directory"] = '"unfinished'
+        self.assertEqual(
+            namespace["PerformSaveAudio"](frame, [], 24000, force_dialog=True), str(destination)
+        )
         dialog.ShowModal.return_value = wx.ID_CANCEL
         frame.cfg["generated_audio_directory"] = str(self.scratch / "do-not-create")
         self.assertIsNone(namespace["PerformSaveAudio"](frame, [], 24000, force_dialog=True))
         self.assertFalse((self.scratch / "do-not-create").exists())
+
+    def test_automatic_recorded_and_generated_audio_accept_quoted_folders(self):
+        sf = Mock()
+        sf.write.side_effect = lambda path, data, fs: Path(path).write_bytes(b"synthetic audio")
+        save = app_methods(
+            {"PerformSaveAudio"},
+            dict(
+                Path=Path,
+                sf=sf,
+                wx=Mock(),
+                write_numbered_audio=write_numbered_audio,
+                validate_filename_component=validate_filename_component,
+                validation_error_message=validation_error_message,
+                default_audio_directory=lambda kind: self.scratch / kind,
+            ),
+        )["PerformSaveAudio"]
+        for generated, kind in ((True, "generated"), (False, "recorded")):
+            folder = self.scratch / kind
+            frame = SimpleNamespace(
+                cfg={
+                    "auto_save_gen_folder": True,
+                    "auto_save_rec_folder": True,
+                    kind + "_audio_directory": f'"{folder}"',
+                },
+                _=lambda key: key,
+            )
+            result = Path(save(frame, [], 24000, is_generated=generated))
+            self.assertEqual(result.parent, folder)
+            self.assertEqual(result.read_bytes(), b"synthetic audio")
 
 
 class RecordingTests(unittest.TestCase):

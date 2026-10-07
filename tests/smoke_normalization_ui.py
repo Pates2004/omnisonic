@@ -24,6 +24,7 @@ def main():
     from omnisonic.batch import BatchResult
     from omnisonic.config import DEFAULT_CONFIG
     from omnivoice.utils.text import normalize_text
+    from tests.test_prompt_cache import Prompt, Tokens
 
     desktop.np = np
     desktop.OmniVoiceGenerationConfig = SimpleNamespace
@@ -33,6 +34,7 @@ def main():
     class Model:
         _asr_pipe = None
         sampling_rate = 24000
+        device = "cpu"
 
         def generate(self, text, language, normalize_text=False, **kwargs):
             assert normalize_text
@@ -41,7 +43,7 @@ def main():
             return [np.zeros(2400, dtype=np.float32)]
 
         def create_voice_clone_prompt(self, **kwargs):
-            return SimpleNamespace()
+            return Prompt(Tokens([1, 2], "cpu"), kwargs.get("ref_text") or "Reference.", 0.1)
 
     convert = normalize_text
 

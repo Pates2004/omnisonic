@@ -10,7 +10,14 @@ import wx
 
 from .batch import BatchInput, BatchInputError, BatchResult, discover_text_files, process_text_batch
 from .config import PRESETS_DIR, default_audio_directory
-from .validation import operation_error_message, safe_child_path, validation_error_message
+from .randomness import seeded_generation
+from .validation import (
+    normalize_pasted_path,
+    operation_error_message,
+    output_directory_path,
+    safe_child_path,
+    validation_error_message,
+)
 
 
 class BatchTabMixin:
@@ -157,10 +164,14 @@ class BatchTabMixin:
             event.Skip()
 
     def OnBatchOutput(self, event):
+        try:
+            default_path = str(output_directory_path(self.batch_output.GetValue()))
+        except (OSError, ValueError):
+            default_path = ""
         with wx.DirDialog(
             self,
             self._("batch_output"),
-            defaultPath=self.batch_output.GetValue(),
+            defaultPath=default_path,
             style=wx.DD_DEFAULT_STYLE,
         ) as dialog:
             if dialog.ShowModal() == wx.ID_OK:
@@ -231,8 +242,20 @@ class BatchTabMixin:
             instruction = ""
         if instruction:
             kwargs["instruct"] = instruction
-        root = self.batch_output.GetValue().strip() or str(default_audio_directory("generated"))
-        output = Path(root).expanduser() / (
+        root = self.batch_output.GetValue()
+        if not normalize_pasted_path(root).strip():
+            root = str(default_audio_directory("generated"))
+        try:
+            output_root = output_directory_path(root)
+        except (OSError, ValueError) as exc:
+            wx.MessageBox(
+                validation_error_message(exc, self._),
+                self._("error_title"),
+                wx.OK | wx.ICON_ERROR,
+                parent=self,
+            )
+            return
+        output = output_root / (
             "batch-" + datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid4().hex[:8]
         )
         self.OnStopAudio(None)
@@ -254,11 +277,21 @@ class BatchTabMixin:
                 for index in indices
             ),
             self.batch_preserve_structure.GetValue(),
+            self._GetGenerationSeed(),
             success_callback=lambda result: self._BatchFinished(result, output),
         )
 
     def _GenBatchWorker(
-        self, state, model, indices, output, kwargs, prompt_source, inputs, preserve_structure
+        self,
+        state,
+        model,
+        indices,
+        output,
+        kwargs,
+        prompt_source,
+        inputs,
+        preserve_structure,
+        seed=None,
     ):
         import numpy as np
         import soundfile as sf
@@ -275,9 +308,11 @@ class BatchTabMixin:
                     str(safe_child_path(PRESETS_DIR, Path(preset).name, reject_links=True))
                 )
                 if preset
-                else model.create_voice_clone_prompt(
-                    ref_audio=reference,
-                    ref_text=text,
+                else self._models.reference_prompt(
+                    state,
+                    model,
+                    reference,
+                    text,
                     preprocess_prompt=kwargs["generation_config"].preprocess_prompt,
                 )
             )
@@ -286,7 +321,10 @@ class BatchTabMixin:
         def synthesize(text):
             state.check_cancelled()
             try:
-                audio = np.asarray(model.generate(text=text, **kwargs)[0])
+                # Each item has its own seed scope: retries and queue ordering
+                # must not change the fixed-seed result of another item.
+                with seeded_generation(seed, model.device):
+                    audio = np.asarray(model.generate(text=text, **kwargs)[0])
             except Exception as exc:
                 message = operation_error_message(exc, self._)
                 if message == str(exc):
@@ -300,6 +338,8 @@ class BatchTabMixin:
             sf.write(str(path), audio, model.sampling_rate, subtype="PCM_16", format="WAV")
 
         def progress(index, result):
+            if result.status == "failed":
+                self._models.clear_reference_prompt_cache()
             done = index if result.status == "running" else index + 1
             state.set_progress(
                 done,

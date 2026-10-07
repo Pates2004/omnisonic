@@ -331,5 +331,8 @@
     "batch_limit": "Kolejka może zawierać maksymalnie 5000 plików. Dodaj mniej plików naraz.",
     "batch_too_large": "Plik tekstowy przekracza limit 5 MiB.",
     "batch_empty_file": "Plik tekstowy jest pusty.",
-    "batch_encoding_error": "Nie można odczytać tekstu. Zapisz plik jako UTF-8 albo UTF-16 z BOM."
+    "batch_encoding_error": "Nie można odczytać tekstu. Zapisz plik jako UTF-8 albo UTF-16 z BOM.",
+    "use_fixed_seed": "Używaj stałego ziarna losowania",
+    "seed_value": "Ziarno losowania (0–2147483647)",
+    "folder_path_invalid": "Ścieżka folderu wyjściowego jest nieprawidłowa. Sprawdź, czy nie zawiera niedomkniętych lub niewłaściwie umieszczonych cudzysłowów."
 }

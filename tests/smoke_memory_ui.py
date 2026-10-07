@@ -26,6 +26,7 @@ def main():
     from omnisonic.config import DEFAULT_CONFIG, CONFIG_FILE, PRESETS_DIR, load_config
     from omnisonic.operations import OperationState, execute_worker
     from omnivoice.models.omnivoice import WhisperASR
+    from tests.test_prompt_cache import Prompt as CachedPrompt, Tokens
 
     desktop.np = np
     desktop.OmniVoiceGenerationConfig = SimpleNamespace
@@ -37,9 +38,7 @@ def main():
         def __call__(self, *args, **kwargs):
             return {"text": "Test reference."}
 
-    class Prompt:
-        ref_text = "Test reference."
-
+    class Prompt(CachedPrompt):
         def save(self, path):
             Path(path).write_text("synthetic UI preset", encoding="utf-8")
 
@@ -53,6 +52,7 @@ def main():
 
     class Model(Transcriber):
         sampling_rate = 22050
+        device = "cpu"
 
         def generate(self, **kwargs):
             if mode["fail"]:
@@ -68,7 +68,7 @@ def main():
                 self.transcribe(kwargs["ref_audio"])
                 if self.unload_asr_after_transcription:
                     assert self._asr_pipe is None
-            return Prompt()
+            return Prompt(Tokens([1, 2], "cpu"), "Test reference.", 0.1)
 
     class TestFrame(desktop.OmniVoiceFrame):
         def AutoLoadModel(self):

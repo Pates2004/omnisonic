@@ -118,13 +118,7 @@ def _output_name(name: str, fallback: str) -> str:
 
 
 def plan_batch_outputs(inputs: list[BatchInput], preserve_structure: bool) -> list[Path]:
-    """Allocate relative, Windows-safe names without merging unrelated input folders."""
-    if not preserve_structure:
-        return [
-            Path(f"{index + 1:04d}_{_output_name(item.path.stem, 'audio')}.wav")
-            for index, item in enumerate(inputs)
-        ]
-
+    """Keep source stems, adding suffixes only for Windows-safe name collisions."""
     # Reserve directories before files, including names such as a folder 'voice.wav'.
     used = {"batch_report.json"}
     directories: dict[tuple[str, ...], Path] = {}
@@ -141,7 +135,7 @@ def plan_batch_outputs(inputs: list[BatchInput], preserve_structure: bool) -> li
 
     for item in inputs:
         parent = Path()
-        if item.root is not None:
+        if preserve_structure and item.root is not None:
             root = item.root.resolve()
             relative = item.path.resolve().relative_to(root)
             if not relative.name:

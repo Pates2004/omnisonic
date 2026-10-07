@@ -1,5 +1,7 @@
 """Single-worker model ownership and independent Whisper/synthesis lifetimes."""
 
+from omnisonic.prompt_cache import ReferencePromptCache
+
 
 class ModelLifecycle:
     def __init__(self, factory, collect, transcriber_factory=None):
@@ -12,16 +14,20 @@ class ModelLifecycle:
         self._model_was_released = False
         self.sampling_rate = 24000
         self.asr_model_name = None
+        self._reference_cache = ReferencePromptCache()
 
     def configure_asr(self, settings):
         name = settings.get("asr_model_name")
         if name is None:
             return
+        if self.asr_model_name != name:
+            self._reference_cache.clear()
         if self.asr_model_name is not None and self.asr_model_name != name:
             self.release_asr()
         self.asr_model_name = name
         if self.model is not None:
             if getattr(self.model, "_asr_model_name", name) != name:
+                self._reference_cache.clear()
                 self.release_asr()
             self.model._asr_model_name = name
 
@@ -43,7 +49,14 @@ class ModelLifecycle:
     def run(self, state, settings, worker, *args):
         try:
             self.ensure(state, settings)
-            return worker(state, self.model, *args)
+            result = worker(state, self.model, *args)
+            state.check_cancelled()
+            return result
+        except Exception:
+            # A prompt created by a failed/cancelled generation must not become
+            # reusable conditioning for the next operation.
+            self._reference_cache.clear()
+            raise
         finally:
             if settings.get("unload_asr_after_transcription", False):
                 # Also release a preloaded pipeline after cancellation/loading
@@ -52,7 +65,24 @@ class ModelLifecycle:
             if settings.get("unload_omnivoice_after_operation", False):
                 self.release_model()
 
+    def reference_prompt(self, state, model, source, transcript, preprocess_prompt=True):
+        """Reuse unchanged audio within this model's lifetime, with CPU-only storage."""
+        identity = (
+            self.asr_model_name,
+            getattr(model, "_asr_model_name", None),
+            str(getattr(model, "_asr_device", None)),
+        )
+        return self._reference_cache.get_or_create(
+            state,
+            model,
+            source,
+            transcript,
+            preprocess_prompt,
+            asr_identity=identity,
+        )
+
     def release_model(self):
+        self._reference_cache.clear()
         if self.model is not None:
             release_caches = getattr(self.model, "release_inference_caches", None)
             if callable(release_caches):
@@ -63,6 +93,10 @@ class ModelLifecycle:
             self.model = None
             self._model_was_released = True
         self.needs_collection = True
+
+    def clear_reference_prompt_cache(self):
+        """Discard conditioning after a failed batch item without stopping its queue."""
+        self._reference_cache.clear()
 
     def run_transcription(self, state, settings, worker, *args):
         if self.model is not None:

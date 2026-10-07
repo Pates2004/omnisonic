@@ -183,12 +183,82 @@ class BatchTests(unittest.TestCase):
             [BatchInput(a), BatchInput(b)], output, OperationState(), str.upper, self.save_audio
         )
         self.assertEqual([item.status for item in results], ["done", "done"])
-        self.assertNotEqual(results[0].output, results[1].output)
+        self.assertEqual([Path(item.output).name for item in results], ["a.wav", "a (2).wav"])
         self.assertEqual(Path(results[1].output).read_text(), "SECOND")
+        saved_outputs = [Path(item.output).read_bytes() for item in results]
         report = json.loads((output / "batch_report.json").read_text(encoding="utf-8"))
         self.assertFalse(report["cancelled"])
         with self.assertRaises(FileExistsError):
             process_text_batch([BatchInput(a)], output, OperationState(), str, self.save_audio)
+        self.assertEqual([Path(item.output).read_bytes() for item in results], saved_outputs)
+        self.assertEqual([a.read_text(), b.read_text()], ["First", "Second"])
+
+    def test_flat_outputs_keep_input_stems_without_number_prefixes(self):
+        root = self.directory / "Book"
+        inputs = [
+            BatchInput(root / "nested" / "Chapter one.txt", root),
+            BatchInput(root / "intro.md", root),
+            BatchInput(self.directory / "separate-part.txt"),
+        ]
+        self.assertEqual(
+            plan_batch_outputs(inputs, False),
+            [Path("Chapter one.wav"), Path("intro.wav"), Path("separate-part.wav")],
+        )
+
+    def test_flat_collision_suffixes_cover_folders_extensions_and_case(self):
+        inputs = [
+            BatchInput(self.directory / folder / name)
+            for folder, name in (("one", "a.txt"), ("two", "a.md"), ("three", "A.txt"))
+        ]
+        self.assertEqual(
+            plan_batch_outputs(inputs, False),
+            [Path("a.wav"), Path("a (2).wav"), Path("A (3).wav")],
+        )
+
+    def test_existing_number_suffixes_never_collide_with_allocated_names(self):
+        inputs = [
+            BatchInput(Path(name))
+            for name in ("chapter (2).txt", "chapter.txt", "chapter.md", "chapter (2).md")
+        ]
+        expected = [
+            Path("chapter (2).wav"),
+            Path("chapter.wav"),
+            Path("chapter (3).wav"),
+            Path("chapter (2) (2).wav"),
+        ]
+        for preserve_structure in (False, True):
+            with self.subTest(preserve_structure=preserve_structure):
+                self.assertEqual(plan_batch_outputs(inputs, preserve_structure), expected)
+
+    def test_sanitization_and_reserved_names_share_collision_reservation(self):
+        inputs = [
+            BatchInput(Path(name)) for name in ("CON.txt", "_CON.md", "chapter?.txt", "chapter*.md")
+        ]
+        expected = [
+            Path("_CON.wav"),
+            Path("_CON (2).wav"),
+            Path("chapter_.wav"),
+            Path("chapter_ (2).wav"),
+        ]
+        for preserve_structure in (False, True):
+            with self.subTest(preserve_structure=preserve_structure):
+                self.assertEqual(plan_batch_outputs(inputs, preserve_structure), expected)
+
+    def test_truncated_stems_and_duplicate_inputs_keep_distinct_outputs(self):
+        long_stem = "a" * 200
+        inputs = [
+            BatchInput(Path(long_stem + "one.txt")),
+            BatchInput(Path(long_stem + "two.md")),
+            BatchInput(Path(long_stem + "one.txt")),
+        ]
+        for preserve_structure in (False, True):
+            with self.subTest(preserve_structure=preserve_structure):
+                outputs = plan_batch_outputs(inputs, preserve_structure)
+                self.assertEqual(
+                    outputs,
+                    [Path(long_stem + suffix + ".wav") for suffix in ("", " (2)", " (3)")],
+                )
+                self.assertEqual(plan_batch_outputs(inputs, preserve_structure), outputs)
 
     def test_bad_file_does_not_stop_remaining_files(self):
         paths = [BatchInput(self.text_file("a.txt", "")), BatchInput(self.text_file("b.txt"))]

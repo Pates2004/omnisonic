@@ -32,6 +32,7 @@ from .i18n import load_locales, translate
 from .files import atomic_write, write_numbered_audio
 from .operations import OperationState, execute_worker
 from .model_lifecycle import ModelLifecycle
+from .randomness import seeded_generation
 from .startup import announce_window
 from .shortcuts import (
     SHORTCUT_DEFINITIONS,
@@ -43,7 +44,9 @@ from .shortcuts import (
 )
 from .theme import apply_theme, theme_for_window
 from .validation import (
+    normalize_pasted_path,
     operation_error_message,
+    output_directory_path,
     preset_filename,
     safe_child_path,
     validate_filename_component,
@@ -1066,14 +1069,17 @@ class SettingsDialog(wx.Dialog):
         apply_theme(self, "dark" if self.cb_theme.GetSelection() == 1 else "light")
 
     def BrowseForDirectory(self, target_ctrl):
-        raw_path = target_ctrl.GetValue().strip()
+        raw_path = target_ctrl.GetValue()
         default_path = ""
         if raw_path:
-            candidate = Path(os.path.expandvars(raw_path)).expanduser()
-            while not candidate.is_dir() and candidate != candidate.parent:
-                candidate = candidate.parent
-            if candidate.is_dir():
-                default_path = str(candidate)
+            try:
+                candidate = output_directory_path(raw_path)
+                while not candidate.is_dir() and candidate != candidate.parent:
+                    candidate = candidate.parent
+                if candidate.is_dir():
+                    default_path = str(candidate)
+            except (OSError, ValueError):
+                pass  # A mistyped path must not prevent browsing for its replacement.
 
         with wx.DirDialog(
             self,
@@ -1085,11 +1091,10 @@ class SettingsDialog(wx.Dialog):
                 target_ctrl.SetValue(dialog.GetPath())
 
     def _validated_audio_directory(self, control, label_key):
-        raw_path = control.GetValue().strip()
-        if not raw_path:
+        raw_path = control.GetValue()
+        if not normalize_pasted_path(raw_path).strip():
             raise ValueError(self._("folder_path_empty").format(name=self._(label_key)))
-        expanded = os.path.expandvars(os.path.expanduser(raw_path))
-        path = Path(os.path.abspath(expanded))
+        path = output_directory_path(raw_path)
         if path.exists() and not path.is_dir():
             raise ValueError(
                 self._("folder_path_is_file").format(name=self._(label_key), path=path)
@@ -1104,6 +1109,8 @@ class SettingsDialog(wx.Dialog):
             "ai_steps": parent.spin_steps.GetValue(),
             "ai_cfg": parent.spin_cfg.GetValue(),
             "ai_speed": parent.spin_speed.GetValue(),
+            "use_fixed_seed": parent.chk_seed.GetValue(),
+            "ai_seed": parent.spin_seed.GetValue(),
             "ai_denoise": parent.chk_denoise.GetValue(),
             "ai_t_shift": parent.spin_t_shift.GetValue(),
             "ai_layer_penalty_factor": parent.spin_layer_penalty.GetValue(),
@@ -1129,6 +1136,9 @@ class SettingsDialog(wx.Dialog):
         parent.spin_steps.SetValue(state["ai_steps"])
         parent.spin_cfg.SetValue(str(state["ai_cfg"]))
         parent.spin_speed.SetValue(str(state["ai_speed"]))
+        parent.chk_seed.SetValue(state["use_fixed_seed"])
+        parent.spin_seed.SetValue(state["ai_seed"])
+        parent.spin_seed.Enable(state["use_fixed_seed"])
         parent.chk_denoise.SetValue(state["ai_denoise"])
         parent.spin_t_shift.SetValue(str(state["ai_t_shift"]))
         parent.spin_layer_penalty.SetValue(str(state["ai_layer_penalty_factor"]))
@@ -1363,6 +1373,8 @@ class SettingsDialog(wx.Dialog):
             self.cfg["ai_steps"] = 32
             self.cfg["ai_cfg"] = 2.0
             self.cfg["ai_speed"] = 1.0
+            self.cfg["use_fixed_seed"] = False
+            self.cfg["ai_seed"] = 0
             self.cfg["ai_denoise"] = True
             self.cfg["ai_t_shift"] = 0.1
             self.cfg["ai_layer_penalty_factor"] = 5.0
@@ -1383,6 +1395,9 @@ class SettingsDialog(wx.Dialog):
                 parent.spin_steps.SetValue(32)
                 parent.spin_cfg.SetValue("2.0")
                 parent.spin_speed.SetValue("1.0")
+                parent.chk_seed.SetValue(False)
+                parent.spin_seed.SetValue(0)
+                parent.spin_seed.Disable()
                 parent.chk_denoise.SetValue(True)
                 parent.spin_t_shift.SetValue("0.1")
                 parent.spin_layer_penalty.SetValue("5.0")
@@ -1450,6 +1465,9 @@ class SettingsDialog(wx.Dialog):
                 parent.spin_steps.SetValue(defaults["ai_steps"])
                 parent.spin_cfg.SetValue(str(defaults["ai_cfg"]))
                 parent.spin_speed.SetValue(str(defaults["ai_speed"]))
+                parent.chk_seed.SetValue(defaults["use_fixed_seed"])
+                parent.spin_seed.SetValue(defaults["ai_seed"])
+                parent.spin_seed.Enable(defaults["use_fixed_seed"])
                 parent.chk_denoise.SetValue(defaults["ai_denoise"])
                 parent.spin_t_shift.SetValue(str(defaults["ai_t_shift"]))
                 parent.spin_layer_penalty.SetValue(str(defaults["ai_layer_penalty_factor"]))
@@ -2213,6 +2231,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 self.cfg["ai_steps"] = self.spin_steps.GetValue()
                 self.cfg["ai_cfg"] = self.spin_cfg.GetValue()
                 self.cfg["ai_speed"] = self.spin_speed.GetValue()
+                self.cfg["use_fixed_seed"] = self.chk_seed.GetValue()
+                self.cfg["ai_seed"] = self.spin_seed.GetValue()
                 self.cfg["ai_denoise"] = self.chk_denoise.GetValue()
                 self.cfg["ai_t_shift"] = self.spin_t_shift.GetValue()
                 self.cfg["ai_layer_penalty_factor"] = self.spin_layer_penalty.GetValue()
@@ -2497,6 +2517,21 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         vbox.Add(self.chk_denoise, 0, wx.ALL, 5)
 
         remember = self.cfg.get("remember_ai_settings", True)
+
+        self.chk_seed = wx.CheckBox(tab, label=self._("use_fixed_seed"))
+        self.chk_seed.SetName(self._("use_fixed_seed"))
+        self.chk_seed.SetValue(self.cfg.get("use_fixed_seed", False) if remember else False)
+        vbox.Add(self.chk_seed, 0, wx.ALL, 5)
+        vbox.Add(wx.StaticText(tab, label=self._("seed_value")), 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
+        self.spin_seed = wx.SpinCtrl(
+            tab, value=str(self.cfg.get("ai_seed", 0) if remember else 0), min=0, max=2147483647
+        )
+        self.spin_seed.SetName(self._("seed_value"))
+        self.spin_seed.Enable(self.chk_seed.GetValue())
+        self.chk_seed.Bind(
+            wx.EVT_CHECKBOX, lambda event: self.spin_seed.Enable(self.chk_seed.GetValue())
+        )
+        vbox.Add(self.spin_seed, 0, wx.ALL, 5)
 
         def add_float_control(attribute, label_key, config_key, default, minimum, maximum, inc):
             text = self._(label_key)
@@ -2872,6 +2907,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self._models.release_all()
         return True
 
+    def _GetGenerationSeed(self):
+        return self.spin_seed.GetValue() if self.chk_seed.GetValue() else None
+
     def GetGenConfig(self):
         return OmniVoiceGenerationConfig(
             num_step=self.spin_steps.GetValue(),
@@ -2999,6 +3037,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             speed,
             duration,
             norm_txt,
+            self._GetGenerationSeed(),
             success_callback=self._finish_generation,
         )
 
@@ -3016,15 +3055,18 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         speed,
         duration,
         norm_txt,
+        seed=None,
     ):
         state.check_cancelled()
         if preset_path:
             preset_path = safe_child_path(PRESETS_DIR, Path(preset_path).name, reject_links=True)
             prompt = VoiceClonePrompt.load(str(preset_path))
         else:
-            prompt = model.create_voice_clone_prompt(
-                ref_audio=ref_audio,
-                ref_text=ref_text,
+            prompt = self._models.reference_prompt(
+                state,
+                model,
+                ref_audio,
+                ref_text,
                 preprocess_prompt=gen_config.preprocess_prompt,
             )
         state.check_cancelled()
@@ -3042,7 +3084,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             kwargs["duration"] = duration
         else:
             kwargs["speed"] = speed
-        audio = model.generate(**kwargs)
+        with seeded_generation(seed, model.device):
+            audio = model.generate(**kwargs)
         state.check_cancelled()
         return audio[0]
 
@@ -3103,10 +3146,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             speed,
             duration,
             norm_txt,
+            self._GetGenerationSeed(),
             success_callback=self._finish_generation,
         )
 
-    def _GenAutoWorker(self, state, model, gen_config, text, lang, speed, duration, norm_txt):
+    def _GenAutoWorker(
+        self, state, model, gen_config, text, lang, speed, duration, norm_txt, seed=None
+    ):
         state.check_cancelled()
         kwargs = {"text": text, "generation_config": gen_config, "normalize_text": norm_txt}
         if lang:
@@ -3115,7 +3161,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             kwargs["duration"] = duration
         else:
             kwargs["speed"] = speed
-        audio = model.generate(**kwargs)
+        with seeded_generation(seed, model.device):
+            audio = model.generate(**kwargs)
         state.check_cancelled()
         return audio[0]
 
@@ -3164,11 +3211,12 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             speed,
             duration,
             norm_txt,
+            self._GetGenerationSeed(),
             success_callback=self._finish_generation,
         )
 
     def _GenDesignWorker(
-        self, state, model, gen_config, text, lang, instruct, speed, duration, norm_txt
+        self, state, model, gen_config, text, lang, instruct, speed, duration, norm_txt, seed=None
     ):
         state.check_cancelled()
         kwargs = {
@@ -3183,7 +3231,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             kwargs["duration"] = duration
         else:
             kwargs["speed"] = speed
-        audio = model.generate(**kwargs)
+        with seeded_generation(seed, model.device):
+            audio = model.generate(**kwargs)
         state.check_cancelled()
         return audio[0]
 
@@ -3267,7 +3316,11 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     @staticmethod
     def _SavePromptAtomically(state, prompt, path):
         path = Path(path)
-        path = safe_child_path(path.parent, path.name, reject_links=True)
+        requested_name = path.name
+        path = safe_child_path(path.parent, requested_name, reject_links=True)
+        # Windows resolves existing names to their old case; keep the requested
+        # spelling only after the parent/redirect checks have succeeded.
+        path = path.with_name(requested_name)
         atomic_write(path, lambda temporary: prompt.save(str(temporary)), state.check_cancelled)
 
     def _SavePresetWorker(
@@ -3331,9 +3384,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             return
 
         try:
-            target_path = safe_child_path(
-                PRESETS_DIR, preset_filename(dialog.name_ctrl.GetValue()), reject_links=True
-            )
+            requested_name = preset_filename(dialog.name_ctrl.GetValue())
+            target_path = safe_child_path(PRESETS_DIR, requested_name, reject_links=True)
+            target_path = target_path.with_name(requested_name)
         except (OSError, ValueError) as exc:
             dialog.Destroy()
             wx.MessageBox(
@@ -3632,9 +3685,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             )
 
         prefix = validate_filename_component(prefix, label="audio prefix")
-        folder = Path(
-            os.path.abspath(os.path.expandvars(os.path.expanduser(str(configured_folder))))
-        )
+        try:
+            folder = output_directory_path(str(configured_folder))
+        except (OSError, ValueError) as exc:
+            if skip_dialog:
+                raise ValueError(validation_error_message(exc, self._)) from exc
+            # A malformed saved preference must not block choosing another path.
+            folder = Path.cwd()
         if skip_dialog:
             path = write_numbered_audio(
                 folder, prefix, lambda temporary: sf.write(str(temporary), data, fs)

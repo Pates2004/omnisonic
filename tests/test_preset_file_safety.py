@@ -7,12 +7,13 @@ import os
 import stat
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 from omnisonic.batch import discover_text_files, read_text_input
-from omnisonic.operations import OperationState
+from omnisonic.files import atomic_write
+from omnisonic.operations import OperationCancelled, OperationState
 from omnisonic.validation import (
     FilenameValidationError,
     is_path_link,
@@ -318,6 +319,172 @@ class PresetFileSafetyTests(unittest.TestCase):
                 frame._StartPresetRebuild.assert_not_called()
                 if method in {"_PromptAndSavePreset", "OnEditPreset"}:
                     dialog.Destroy.assert_called_once()
+
+
+class PresetRenameTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = Path(tempfile.mkdtemp(prefix="preset-file-safety-", dir=ROOT / "trash"))
+        self.wx = MagicMock(ID_OK=1, YES=2, YES_NO=4, ICON_WARNING=8)
+        self.wx.MessageBox.return_value = self.wx.YES
+        self.dialog = Mock()
+        self.dialog.ShowModal.return_value = self.wx.ID_OK
+        self.dialog.source_ctrl.GetValue.return_value = ""
+        self.dialog.ref_text_ctrl.GetValue.return_value = "Updated transcript"
+        self.loaded_prompt = self.prompt("Old transcript")
+        self.rebuilt_prompt = self.prompt("Updated transcript")
+        self.model = Mock()
+        self.model.create_voice_clone_prompt.return_value = self.rebuilt_prompt
+        self.namespace = app_methods(
+            {
+                "OnEditPreset",
+                "_ConfirmPresetOverwrite",
+                "_SavePromptAtomically",
+                "_UpdatePresetWorker",
+                "_SavePresetWorker",
+            },
+            dict(
+                wx=self.wx,
+                PRESETS_DIR=self.directory,
+                Path=Path,
+                os=os,
+                atomic_write=atomic_write,
+                preset_filename=preset_filename,
+                safe_child_path=safe_child_path,
+                validation_error_message=validation_error_message,
+                VoiceClonePrompt=Mock(load=Mock(return_value=self.loaded_prompt)),
+                PresetEditDialog=Mock(return_value=self.dialog),
+            ),
+        )
+        self.frame = SimpleNamespace(
+            _=lambda key: key,
+            _CanUseModel=Mock(return_value=True),
+            _PresetSaved=Mock(),
+        )
+        for name in (
+            "OnEditPreset",
+            "_ConfirmPresetOverwrite",
+            "_UpdatePresetWorker",
+            "_SavePresetWorker",
+        ):
+            setattr(self.frame, name, self.namespace[name].__get__(self.frame))
+        self.frame._SavePromptAtomically = self.namespace["_SavePromptAtomically"]
+        self.frame.RunOperation = Mock(
+            side_effect=lambda title, message, worker, *args, **kwargs: worker(
+                OperationState(), *args
+            )
+        )
+        self.frame._StartPresetRebuild = Mock(
+            side_effect=lambda audio, text, path, original_path: self.frame._SavePresetWorker(
+                OperationState(), self.model, audio, text, path, True, original_path
+            )
+        )
+
+    @staticmethod
+    def prompt(text):
+        prompt = SimpleNamespace(ref_text=text)
+        prompt.save = lambda path: Path(path).write_text(prompt.ref_text, encoding="utf-8")
+        return prompt
+
+    def edit(self, original_name, requested_name, *, rebuild=False):
+        original = self.directory / original_name
+        original.write_bytes(b"original preset")
+        self.frame._SelectedManagedPreset = Mock(return_value=original)
+        self.dialog.name_ctrl.GetValue.return_value = requested_name
+        if rebuild:
+            source = self.directory / "synthetic-reference.wav"
+            source.write_bytes(b"synthetic reference; model decoding is mocked")
+            self.dialog.source_ctrl.GetValue.return_value = str(source)
+        self.frame.OnEditPreset(None)
+        return original
+
+    def test_case_only_edit_keeps_requested_spelling_and_never_deletes_result(self):
+        for rebuild in (False, True):
+            with self.subTest(rebuild=rebuild):
+                self.setUp()
+                self.edit("Voice.pt", "voice", rebuild=rebuild)
+                self.assertEqual([path.name for path in self.directory.glob("*.pt")], ["voice.pt"])
+                self.assertEqual(
+                    (self.directory / "voice.pt").read_text(encoding="utf-8"),
+                    "Updated transcript",
+                )
+                self.wx.MessageBox.assert_not_called()
+                self.assertEqual(self.model.create_voice_clone_prompt.call_count, int(rebuild))
+
+    def test_different_destination_replaces_only_after_confirmation(self):
+        for rebuild in (False, True):
+            for confirm in (False, True):
+                with self.subTest(rebuild=rebuild, confirm=confirm):
+                    self.setUp()
+                    destination = self.directory / "Other.pt"
+                    destination.write_bytes(b"existing destination")
+                    self.wx.MessageBox.return_value = self.wx.YES if confirm else 0
+                    original = self.edit("Voice.pt", "Other", rebuild=rebuild)
+                    self.wx.MessageBox.assert_called_once()
+                    self.assertEqual(original.exists(), not confirm)
+                    self.assertEqual(
+                        destination.read_bytes(),
+                        b"Updated transcript" if confirm else b"existing destination",
+                    )
+
+    def test_cancelled_case_only_edit_preserves_original_spelling_and_contents(self):
+        for rebuild in (False, True):
+            with self.subTest(rebuild=rebuild):
+                self.setUp()
+                original = self.directory / "Voice.pt"
+                original.write_bytes(b"original preset")
+                state = OperationState()
+
+                def save(path, state=state):
+                    Path(path).write_bytes(b"uncommitted replacement")
+                    state.request_cancel()
+
+                prompt = SimpleNamespace(save=save)
+                target = self.directory / "voice.pt"
+                with self.assertRaises(OperationCancelled):
+                    if rebuild:
+                        self.model.create_voice_clone_prompt.return_value = prompt
+                        self.frame._SavePresetWorker(
+                            state, self.model, "mocked.wav", "text", target, True, original
+                        )
+                    else:
+                        self.frame._UpdatePresetWorker(state, prompt, target, original)
+                self.assertEqual([path.name for path in self.directory.iterdir()], ["Voice.pt"])
+                self.assertEqual(original.read_bytes(), b"original preset")
+
+    def test_source_cleanup_respects_native_path_identity_not_blanket_casefolding(self):
+        for path_type, root, remove_original in (
+            (PureWindowsPath, "C:/presets", False),
+            (PurePosixPath, "/presets", True),
+        ):
+            for rebuild in (False, True):
+                with self.subTest(path_type=path_type.__name__, rebuild=rebuild):
+                    self.setUp()
+                    original = path_type(root) / "Voice.pt"
+                    target = path_type(root) / "voice.pt"
+                    cleanup_target = Mock()
+                    validator = Mock(return_value=cleanup_target)
+                    self.namespace["safe_child_path"] = validator
+                    self.frame._SavePromptAtomically = Mock()
+                    if rebuild:
+                        self.frame._SavePresetWorker(
+                            OperationState(),
+                            self.model,
+                            "mocked.wav",
+                            "text",
+                            target,
+                            True,
+                            original,
+                        )
+                    else:
+                        self.frame._UpdatePresetWorker(
+                            OperationState(), self.loaded_prompt, target, original
+                        )
+                    self.assertEqual(validator.call_count, int(remove_original))
+                    self.assertEqual(cleanup_target.unlink.call_count, int(remove_original))
+                    if remove_original:
+                        validator.assert_called_once_with(
+                            original.parent, original.name, reject_links=True
+                        )
 
 
 if __name__ == "__main__":

@@ -796,6 +796,7 @@ function Install-PortablePythonAt {
     # isolated build environments (including the ROCm source distribution).
     $unpack = Join-Path $WorkDir ("python-unpack-" + [Guid]::NewGuid().ToString("N"))
     Assert-ProjectChildPath $unpack | Out-Null
+    $extractionError = $null
     try {
         Expand-Archive -LiteralPath $archive -DestinationPath $unpack
         $toolsRoot = Join-Path $unpack "tools"
@@ -804,8 +805,18 @@ function Install-PortablePythonAt {
         }
         Move-Item -LiteralPath $toolsRoot -Destination $TargetRoot
     }
+    catch {
+        $extractionError = $_
+        throw
+    }
     finally {
-        Remove-LauncherDirectory $unpack
+        try { Remove-LauncherDirectory $unpack }
+        catch {
+            if ($null -ne $extractionError) {
+                throw "Portable Python preparation failed: $($extractionError.Exception.Message) Cleanup also failed: $($_.Exception.Message) Temporary extraction files remain at $unpack. / Nie udalo sie przygotowac Pythona ani usunac plikow tymczasowych; szczegoly i ich katalog podano powyzej."
+            }
+            throw
+        }
     }
     $python = Get-EnvironmentPython "Portable" $TargetRoot
     if (-not (Test-CompatiblePython $python)) { throw "Portable Python is not compatible." }

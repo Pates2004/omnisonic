@@ -44,6 +44,37 @@ def operation_error_message(error: Exception, translate_func) -> str:
     return validation_error_message(error, translate_func)
 
 
+def normalize_pasted_path(value: str) -> str:
+    """Remove one double-quote wrapper produced by Windows Copy as path.
+
+    Apostrophes and whitespace inside the wrapper belong to the actual path.
+    Do not strip quotes from individual components or interpret shell syntax.
+    """
+    value = value.strip()
+    if value.count('"') == 2 and value.startswith('"') and value.endswith('"'):
+        return value[1:-1]
+    return value
+
+
+def output_directory_path(value: str) -> Path:
+    """Use the same path interpretation for settings, batch and audio saving."""
+    value = normalize_pasted_path(value)
+    # ntpath.expandvars treats apostrophes as shell quotes, but an apostrophe
+    # in a directory name must not prevent expansion of a later variable.
+    variable_pattern = r"\$(?:\{([^}]+)\}|([A-Za-z_][A-Za-z0-9_]*))"
+    if os.name == "nt":
+        variable_pattern += r"|%([^%]+)%"
+
+    def replace_variable(match):
+        name = next(group for group in match.groups() if group is not None)
+        return os.environ.get(name, match.group(0))
+
+    expanded = re.sub(variable_pattern, replace_variable, os.path.expanduser(value))
+    if not expanded.strip() or "\0" in expanded or (os.name == "nt" and '"' in expanded):
+        raise FilenameValidationError("Invalid output folder path", "folder_path_invalid")
+    return Path(os.path.abspath(expanded))
+
+
 def validate_filename_component(value: str, *, label: str = "name") -> str:
     value = value.strip()
     if not value:
