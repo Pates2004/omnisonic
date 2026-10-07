@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import codecs
 import json
+import logging
 import os
 import re
 import tempfile
@@ -18,6 +19,7 @@ from .validation import is_path_link
 TEXT_EXTENSIONS = {".txt", ".md"}
 MAX_TEXT_BYTES = 5 * 1024 * 1024
 MAX_BATCH_FILES = 5000
+logger = logging.getLogger(__name__)
 
 
 class BatchInputError(ValueError):
@@ -209,7 +211,13 @@ def process_text_batch(
                 result.error = str(exc)
             finally:
                 if temporary is not None:
-                    temporary.unlink(missing_ok=True)
+                    try:
+                        temporary.unlink(missing_ok=True)
+                    except OSError as exc:
+                        # Preserve the file result/cancellation if another process locks a partial file.
+                        logger.warning(
+                            "Could not remove partial batch audio %s: %s", temporary, exc
+                        )
                 on_result(index, BatchResult(**asdict(result)))
     finally:
         report = {

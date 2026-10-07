@@ -1667,6 +1667,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.model = None
         self.audio_data = None
         self.sample_rate = 24000
+        self._generated_playback_state = "stopped"
+        self._reference_playback_state = "stopped"
         self.current_op = None
         self.rec_stream = None
         self.rec_data = []
@@ -2624,6 +2626,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.BrowseFor(self.clone_ref_audio)
 
     def OnReferenceAudioChanged(self, event):
+        if self._reference_playback_state != "stopped":
+            self._stop_sound_device()
+            self._reset_reference_player()
+            self.tab_clone.Layout()
         # Invalidate old text/results even if a new recording reused the same filename.
         self._reference_revision += 1
         self.clone_ref_text.ChangeValue("")
@@ -3515,7 +3521,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             timer.Stop()
         self.play_timer = None
         self.play_start_time = None
-        self.is_paused = False
+        self._generated_playback_state = "stopped"
         self.current_frame = 0
         if hasattr(self, "btn_play"):
             self.btn_play.SetLabel(self._("play"))
@@ -3533,16 +3539,16 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if hasattr(self, "btn_stop_ref"):
             self.btn_stop_ref.Hide()
         self.ref_current_frame = 0
+        self._reference_playback_state = "stopped"
 
     def OnPlayAudio(self, event):
         import time
 
-        if self.btn_play.GetLabel() == self._("play"):
+        if self._generated_playback_state == "stopped":
             if self.audio_data is not None and sd:
                 self.OnStopAudio(None)
                 self.current_frame = 0
                 self.total_frames = len(self.audio_data)
-                self.is_paused = False
 
                 frames_left = self.total_frames - self.current_frame
                 if not self._play_sound_data(
@@ -3550,6 +3556,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 ):
                     return
 
+                self._generated_playback_state = "playing"
                 self.btn_play.SetLabel(self._("pause"))
                 self.btn_stop_audio.Show()
                 self.panel.Layout()
@@ -3565,8 +3572,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 self.play_start_time = time.monotonic()
                 self.play_timer = wx.CallLater(duration_ms + 100, on_finish)
 
-        elif self.btn_play.GetLabel() == self._("pause"):
-            self.is_paused = True
+        elif self._generated_playback_state == "playing":
             if hasattr(self, "play_timer") and self.play_timer:
                 if self.play_start_time is not None:
                     elapsed = max(0.0, time.monotonic() - self.play_start_time)
@@ -3579,10 +3585,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 self._reset_generated_player()
                 self.panel.Layout()
                 return
+            self._generated_playback_state = "paused"
             self.btn_play.SetLabel(self._("resume_play"))
 
-        elif self.btn_play.GetLabel() == self._("resume_play"):
-            self.is_paused = False
+        elif self._generated_playback_state == "paused":
             frames_left = self.total_frames - self.current_frame
             if frames_left <= 0:
                 self._reset_generated_player()
@@ -3591,6 +3597,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             if not self._play_sound_data(self.audio_data[self.current_frame :], self.sample_rate):
                 self._reset_generated_player()
                 return
+            self._generated_playback_state = "playing"
             self.btn_play.SetLabel(self._("pause"))
 
             duration_ms = int((frames_left / self.sample_rate) * 1000)
@@ -3688,7 +3695,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     def TogglePlayFile(self, btn_play, path_ctrl, btn_stop, parent_tab):
         import time
 
-        if btn_play.GetLabel() == self._("play_ref"):
+        if self._reference_playback_state == "stopped":
             path = path_ctrl.GetValue().strip()
             if not os.path.exists(path):
                 wx.MessageBox(
@@ -3708,6 +3715,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                     self.ref_audio_data[self.ref_current_frame :], self.ref_sample_rate
                 ):
                     return
+                self._reference_playback_state = "playing"
                 btn_play.SetLabel(self._("pause"))
                 btn_stop.Show()
                 parent_tab.Layout()
@@ -3726,7 +3734,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                     wx.OK | wx.ICON_ERROR,
                 )
 
-        elif btn_play.GetLabel() == self._("pause"):
+        elif self._reference_playback_state == "playing":
             timer = getattr(self, f"timer_{id(btn_play)}", None)
             if timer:
                 start_time = getattr(self, f"start_{id(btn_play)}", None)
@@ -3742,9 +3750,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 self._reset_reference_player()
                 parent_tab.Layout()
                 return
+            self._reference_playback_state = "paused"
             btn_play.SetLabel(self._("resume_play"))
 
-        elif btn_play.GetLabel() == self._("resume_play"):
+        elif self._reference_playback_state == "paused":
             frames_left = self.ref_total_frames - self.ref_current_frame
             if frames_left <= 0:
                 self._reset_reference_player()
@@ -3755,6 +3764,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             ):
                 self._reset_reference_player()
                 return
+            self._reference_playback_state = "playing"
             btn_play.SetLabel(self._("pause"))
 
             duration_ms = int((frames_left / self.ref_sample_rate) * 1000)

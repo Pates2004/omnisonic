@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 from omnisonic.batch import (
     BatchInput,
     BatchInputError,
+    BatchResult,
     discover_text_files,
     plan_batch_outputs,
     process_text_batch,
@@ -25,6 +26,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BatchSettingsTests(unittest.TestCase):
+    def test_scan_completion_only_focuses_visible_enabled_queue(self):
+        tree = ast.parse((ROOT / "omnisonic/batch_ui.py").read_text(encoding="utf-8"))
+        handler = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_BatchScanned"
+        )
+        namespace = {"BatchResult": BatchResult}
+        exec(compile(ast.Module(body=[handler], type_ignores=[]), "batch-scan", "exec"), namespace)
+        for shown, enabled in ((True, True), (False, True), (True, False), (False, False)):
+            with self.subTest(shown=shown, enabled=enabled):
+                frame = Mock(batch_items=[], _=lambda key: key)
+                frame.batch_list.IsShownOnScreen.return_value = shown
+                frame.batch_list.IsEnabled.return_value = enabled
+                namespace["_BatchScanned"](frame, ([BatchInput(Path("input.txt"))], []))
+                self.assertEqual(frame.batch_items[0].source, "input.txt")
+                frame._refresh_batch_list.assert_called_once_with()
+                self.assertEqual(frame.batch_list.SetFocus.call_count, int(shown and enabled))
+
     def test_both_folder_options_are_enabled_by_default(self):
         tree = ast.parse((ROOT / "omnisonic/batch_ui.py").read_text(encoding="utf-8"))
         setup = next(
@@ -189,6 +209,64 @@ class BatchTests(unittest.TestCase):
         result = process_text_batch(paths, output, OperationState(), str, save)
         self.assertEqual([item.status for item in result], ["failed", "done"])
         self.assertEqual(list(output.glob("*.part.wav")), [])
+
+    def test_failed_partial_cleanup_preserves_error_and_continues(self):
+        inputs = [BatchInput(self.text_file("a.txt", "First")), BatchInput(self.text_file("b.txt"))]
+        blocked = None
+        original_unlink = Path.unlink
+
+        def save(path, audio):
+            nonlocal blocked
+            path.write_text(audio, encoding="utf-8")
+            if audio == "First":
+                blocked = path
+                raise OSError("Original save error")
+
+        def unlink(path, *args, **kwargs):
+            if path == blocked:
+                raise PermissionError("Temporary audio is locked")
+            return original_unlink(path, *args, **kwargs)
+
+        output = self.directory / "out"
+        updates = []
+        with (
+            patch.object(Path, "unlink", unlink),
+            self.assertLogs("omnisonic.batch", "WARNING") as logs,
+        ):
+            results = process_text_batch(
+                inputs,
+                output,
+                OperationState(),
+                str,
+                save,
+                lambda index, result: updates.append((index, result.status)),
+            )
+        self.assertEqual([result.status for result in results], ["failed", "done"])
+        self.assertEqual(results[0].error, "Original save error")
+        self.assertIn((0, "failed"), updates)
+        self.assertTrue(blocked.is_file())
+        self.assertTrue(Path(results[1].output).is_file())
+        self.assertIn(str(blocked), logs.output[0])
+        report = json.loads((output / "batch_report.json").read_text(encoding="utf-8"))
+        self.assertEqual([item["status"] for item in report["files"]], ["failed", "done"])
+
+    def test_failed_partial_cleanup_does_not_mask_cancellation(self):
+        state = OperationState()
+        output = self.directory / "out"
+
+        def save(path, audio):
+            path.write_text(audio, encoding="utf-8")
+            state.request_cancel()
+
+        with patch.object(Path, "unlink", side_effect=PermissionError("Locked temporary audio")):
+            with (
+                self.assertRaises(OperationCancelled),
+                self.assertLogs("omnisonic.batch", "WARNING"),
+            ):
+                process_text_batch([BatchInput(self.text_file("a.txt"))], output, state, str, save)
+        report = json.loads((output / "batch_report.json").read_text(encoding="utf-8"))
+        self.assertTrue(report["cancelled"])
+        self.assertEqual(report["files"][0]["status"], "cancelled")
 
     def test_cancellation_keeps_completed_files_and_records_report(self):
         paths = [BatchInput(self.text_file("a.txt")), BatchInput(self.text_file("b.txt"))]

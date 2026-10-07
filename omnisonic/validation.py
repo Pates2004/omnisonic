@@ -16,6 +16,7 @@ _WINDOWS_RESERVED_NAMES = {
     "NUL",
     *(f"COM{i}" for i in range(1, 10)),
     *(f"LPT{i}" for i in range(1, 10)),
+    *(f"{prefix}{digit}" for prefix in ("COM", "LPT") for digit in "\u00b9\u00b2\u00b3"),
 }
 
 

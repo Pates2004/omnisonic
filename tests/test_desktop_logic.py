@@ -30,6 +30,7 @@ from omnisonic.shortcuts import (
     normalize_shortcut,
 )
 from omnisonic.validation import (
+    FilenameValidationError,
     preset_filename,
     safe_child_path,
     validate_filename_component,
@@ -292,6 +293,19 @@ class ConfigTests(unittest.TestCase):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_windows_superscript_device_names_are_rejected(self):
+        for prefix in ("COM", "LPT"):
+            for digit in ("\u00b9", "\u00b2", "\u00b3"):
+                for suffix in ("", ".pt", ".extra.wav"):
+                    name = prefix.lower() + digit + suffix
+                    with self.subTest(name=name):
+                        with self.assertRaises(FilenameValidationError) as caught:
+                            validate_filename_component(name)
+                        self.assertEqual(caught.exception.message_key, "filename_reserved")
+        for name in ("COM0", "COM10", "COM\u2074", "COM\u00b9_voice", "LPT\u00b2 recording"):
+            with self.subTest(valid_name=name):
+                self.assertEqual(validate_filename_component(name), name)
+
     def test_preset_name_gets_one_extension(self):
         self.assertEqual(preset_filename("My voice.pt"), "My voice.pt")
 

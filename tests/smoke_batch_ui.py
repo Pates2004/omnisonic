@@ -83,12 +83,14 @@ def main():
         second.parent.mkdir(parents=True)
         first.write_text("First sentence.", encoding="utf-8")
         second.write_text("Second sentence.", encoding="utf-8")
-        frame._scan_batch_inputs([str(first), str(second.parent.parent)])
-        wait_for_worker()
-        assert frame.batch_list.GetItemCount() == 2
-        frame._scan_batch_inputs([str(first)])
-        wait_for_worker()
-        assert frame.batch_list.GetItemCount() == 2
+        with patch.object(frame.batch_list, "SetFocus", wraps=frame.batch_list.SetFocus) as focus:
+            frame._scan_batch_inputs([str(first), str(second.parent.parent)])
+            wait_for_worker()
+            assert frame.batch_list.GetItemCount() == 2
+            frame._scan_batch_inputs([str(first)])
+            wait_for_worker()
+            assert frame.batch_list.GetItemCount() == 2
+            focus.assert_not_called()  # The fixture frame and its queue are hidden.
         frame.model = Model()
         frame.batch_mode.SetSelection(2)
         frame.notebook.SetSelection(frame.notebook.FindPage(frame.tab_batch))

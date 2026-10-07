@@ -123,7 +123,8 @@ class BatchTabMixin:
         self.Log(self._("batch_added").format(count=len(inputs), total=len(self.batch_items)))
         if errors:
             self.Log("\n".join(f"{path}: {self._(error)}" for path, error in errors))
-        self.batch_list.SetFocus()
+        if self.batch_list.IsShownOnScreen() and self.batch_list.IsEnabled():
+            self.batch_list.SetFocus()
 
     def _refresh_batch_list(self):
         self.batch_list.DeleteAllItems()
