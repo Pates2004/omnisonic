@@ -42,7 +42,7 @@ function Join-SwitchChild {
     $parts = $Relative.Replace('\', '/').Split('/')
     foreach ($part in $parts) {
         if (-not $part -or $part -in @('.', '..') -or $part -match '[<>:"|?*\x00-\x1f]' -or
-            $part -match '[. ]$' -or $part -match '^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\.|$)') {
+            $part -match '[. ]$' -or $part -match '^(CON|PRN|AUX|NUL|COM[0-9\u00b9\u00b2\u00b3]|LPT[0-9\u00b9\u00b2\u00b3])(?:\.|$)') {
             throw "Unsafe profile path: $Relative"
         }
     }
@@ -67,13 +67,18 @@ function Copy-SwitchFile {
     $sourceFull = Assert-SwitchPath $Source
     $targetFull = Assert-SwitchPath $Destination
     if ((Get-Item -LiteralPath $sourceFull -Force).PSIsContainer) { throw 'Expected a file.' }
-    [IO.Directory]::CreateDirectory((Split-Path -Parent $targetFull)) | Out-Null
-    $temporary = "$targetFull.power-switch-$([Guid]::NewGuid().ToString('N')).tmp"
+    $targetDirectory = Split-Path -Parent $targetFull
+    [IO.Directory]::CreateDirectory($targetDirectory) | Out-Null
+    $temporary = Join-Path $targetDirectory ('.power-switch-' + [Guid]::NewGuid().ToString('N') + '.tmp')
     try {
         [IO.File]::Copy($sourceFull, $temporary, $false)
         Move-Item -LiteralPath $temporary -Destination $targetFull -Force
     } finally {
-        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
+        try {
+            if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
+        } catch {
+            Write-Warning -Message "Could not remove temporary profile file / Nie mozna usunac tymczasowego pliku profilu ${temporary}: $($_.Exception.Message)" -WarningAction Continue
+        }
     }
 }
 
@@ -114,6 +119,24 @@ function Get-SwitchAudioSource {
     $path = Join-Path $SwitchDocuments $Kind
     if ($null -ne $Settings -and $null -ne $Settings.PSObject.Properties[$key] -and
         -not [string]::IsNullOrWhiteSpace([string]$Settings.$key)) { $path = [string]$Settings.$key }
+    # Match the desktop's Copy-as-path and environment-variable handling.
+    # Expand values as plain text, never as PowerShell expressions or commands.
+    $path = $path.Trim()
+    if ([regex]::Matches($path, '"').Count -eq 2 -and $path.StartsWith('"') -and $path.EndsWith('"')) {
+        $path = $path.Substring(1, $path.Length - 2)
+    }
+    $path = [regex]::Replace($path, '\$(?:\{([^}]+)\}|([A-Za-z_][A-Za-z0-9_]*))|%([^%]+)%',
+        [Text.RegularExpressions.MatchEvaluator]{
+            param($pathMatch)
+            foreach ($groupIndex in 1..3) {
+                if ($pathMatch.Groups[$groupIndex].Success) {
+                    $value = [Environment]::GetEnvironmentVariable($pathMatch.Groups[$groupIndex].Value, 'Process')
+                    if ($null -ne $value) { return $value }
+                    return $pathMatch.Value
+                }
+            }
+            return $pathMatch.Value
+        })
     $full = Assert-SwitchPath $path
     foreach ($broad in @([IO.Path]::GetPathRoot($full), $SwitchRoot, $SwitchData,
         [Environment]::GetFolderPath('UserProfile'), [Environment]::GetFolderPath('MyDocuments'))) {

@@ -50,36 +50,43 @@ def discover_text_files(
     seen = {os.path.normcase(str(Path(path).resolve())) for path in existing}
     visited: set[str] = set()
 
-    def visit(path: Path, explicit: bool, root: Path | None = None):
-        check_cancelled()
-        try:
-            if _is_link(path):
-                if explicit:
-                    errors.append((str(path), "batch_link_skipped"))
-                return
-            path = path.resolve()
-            key = os.path.normcase(str(path))
-            if path.is_dir():
-                if key in visited:
-                    return
-                visited.add(key)
-                for child in sorted(path.iterdir(), key=lambda item: item.name.casefold()):
-                    if child.is_dir() and not recursive:
-                        continue
-                    visit(child, False, root if root is not None else path)
-            elif path.is_file() and path.suffix.lower() in TEXT_EXTENSIONS | SUBTITLE_EXTENSIONS:
-                if key not in seen:
-                    if len(seen) >= MAX_BATCH_FILES:
-                        raise BatchInputError("batch_limit")
-                    seen.add(key)
-                    found.append(BatchInput(path, root))
-            elif explicit:
-                errors.append((str(path), "batch_unsupported"))
-        except OSError as exc:
-            errors.append((str(path), str(exc)))
-
     for candidate in inputs:
-        visit(Path(candidate).expanduser(), True)
+        pending: list[tuple[Path, bool, Path | None]] = [(Path(candidate).expanduser(), True, None)]
+        while pending:
+            path, explicit, root = pending.pop()
+            check_cancelled()
+            try:
+                if _is_link(path):
+                    if explicit:
+                        errors.append((str(path), "batch_link_skipped"))
+                    continue
+                path = path.resolve()
+                key = os.path.normcase(str(path))
+                if path.is_dir():
+                    if key in visited:
+                        continue
+                    visited.add(key)
+                    children = sorted(path.iterdir(), key=lambda item: item.name.casefold())
+                    if not recursive:
+                        children = [child for child in children if not child.is_dir()]
+                    # Reverse the stack, not the traversal: retain the sorted
+                    # depth-first order without depending on Python recursion.
+                    pending.extend(
+                        (child, False, root if root is not None else path)
+                        for child in reversed(children)
+                    )
+                elif (
+                    path.is_file() and path.suffix.lower() in TEXT_EXTENSIONS | SUBTITLE_EXTENSIONS
+                ):
+                    if key not in seen:
+                        if len(seen) >= MAX_BATCH_FILES:
+                            raise BatchInputError("batch_limit")
+                        seen.add(key)
+                        found.append(BatchInput(path, root))
+                elif explicit:
+                    errors.append((str(path), "batch_unsupported"))
+            except OSError as exc:
+                errors.append((str(path), str(exc)))
     return found, errors
 
 

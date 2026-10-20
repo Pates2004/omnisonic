@@ -4,7 +4,7 @@ import ast
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, call
 
 from omnisonic.operations import OperationState
 
@@ -13,7 +13,14 @@ class DispatchTests(unittest.TestCase):
     def setUp(self):
         self.wx = Mock(ID_YES=1, YES_NO=2, ICON_QUESTION=4, OK=8, ICON_WARNING=16)
         self.dialog = Mock()
-        namespace = {"wx": self.wx, "OperationDialog": self.dialog}
+        self.threading = Mock()
+        namespace = {
+            "wx": self.wx,
+            "OperationDialog": self.dialog,
+            "OperationState": OperationState,
+            "threading": self.threading,
+            "logging": Mock(),
+        }
         source = ast.parse(
             (Path(__file__).resolve().parents[1] / "omnisonic/app.py").read_text(encoding="utf-8")
         )
@@ -117,6 +124,205 @@ class DispatchTests(unittest.TestCase):
         self.frame._complete_operation.side_effect = complete
         self.assertIs(self.start(), self.state)
         self.assertIsNone(self.frame.current_op)
+
+    def test_failed_worker_start_completes_error_and_unblocks_retry(self):
+        self.frame.current_op = None
+        self.frame.cfg["show_progress"] = False
+        failure = RuntimeError("can't start new thread")
+        self.threading.Thread.return_value.start.side_effect = failure
+        state = self.start()
+        self.assertTrue(state.finished)
+        self.assertIs(state.error, failure)
+        self.assertIsNone(self.frame.current_op)
+        self.frame.prog_timer.Stop.assert_called_once_with()
+        self.frame.btn_stop.Disable.assert_called_once_with()
+        self.frame._complete_operation.assert_called_once_with(state, None)
+        self.assertEqual(
+            self.frame._set_operation_controls_enabled.call_args_list,
+            [call(False), call(True)],
+        )
+        self.threading.Thread.return_value.start.side_effect = None
+        replacement = self.start()
+        self.assertIs(self.frame.current_op, replacement)
+        self.assertFalse(replacement.finished)
+
+
+class WorkerStartFailureTests(unittest.TestCase):
+    def setUp(self):
+        self.wx = MagicMock()
+        self.threading = Mock()
+        self.failure = RuntimeError("can't start new thread")
+        self.threading.Thread.return_value.start.side_effect = self.failure
+        self.namespace = {
+            "wx": self.wx,
+            "threading": self.threading,
+            "logging": Mock(),
+            "apply_theme": Mock(),
+        }
+        self.tree = ast.parse(
+            (Path(__file__).resolve().parents[1] / "omnisonic/app.py").read_text(encoding="utf-8")
+        )
+
+    def bind(self, holder, class_name, names):
+        node = next(
+            item
+            for item in self.tree.body
+            if isinstance(item, ast.ClassDef) and item.name == class_name
+        )
+        methods = [
+            item for item in node.body if isinstance(item, ast.FunctionDef) and item.name in names
+        ]
+        namespace = dict(self.namespace)
+        exec(compile(ast.Module(body=methods, type_ignores=[]), "worker-start", "exec"), namespace)
+        for method in methods:
+            setattr(holder, method.name, namespace[method.name].__get__(holder))
+
+    def test_operation_start_failure_finishes_and_destroys_both_progress_modes(self):
+        for native in (False, True):
+            with self.subTest(native=native):
+                self.wx.reset_mock()
+                holder = SimpleNamespace(
+                    cfg={"use_native_dialogs": native},
+                    state=OperationState(),
+                    parent=None,
+                    title="Synthetic operation",
+                    msg="Synthetic message",
+                    _run_worker=Mock(),
+                    _confirm_cancel=Mock(),
+                    _=lambda key: key,
+                )
+                self.bind(holder, "OperationDialog", {"ShowModal", "_start_worker"})
+                state = holder.ShowModal()
+                self.assertIs(state, holder.state)
+                self.assertTrue(state.finished)
+                self.assertIs(state.error, self.failure)
+                holder._run_worker.assert_not_called()
+                holder.dialog.ShowModal.assert_not_called()
+                holder.dialog.Destroy.assert_called_once_with()
+                if not native:
+                    self.wx.Timer.return_value.Stop.assert_called_once_with()
+
+    def test_import_start_failure_finishes_and_destroys_both_splash_modes(self):
+        for native in (False, True):
+            with self.subTest(native=native):
+                self.wx.reset_mock()
+                holder = SimpleNamespace(
+                    cfg={"use_native_dialogs": native},
+                    parent=None,
+                    finished=False,
+                    cancel_requested=False,
+                    error=None,
+                    DoHeavyImports=Mock(),
+                    _confirm_cancel=Mock(),
+                    _=lambda key: key,
+                )
+                self.bind(holder, "StartupSplash", {"ShowModal", "_start_imports"})
+                self.assertEqual(holder.ShowModal(), self.wx.ID_CANCEL)
+                self.assertTrue(holder.finished)
+                self.assertIs(holder.error, self.failure)
+                holder.DoHeavyImports.assert_not_called()
+                holder.dialog.ShowModal.assert_not_called()
+                holder.dialog.Destroy.assert_called_once_with()
+                if not native:
+                    self.wx.Timer.return_value.Stop.assert_called_once_with()
+
+    def test_download_start_failure_closes_as_error_instead_of_waiting_forever(self):
+        holder = SimpleNamespace(
+            state=OperationState(),
+            _run_download=Mock(),
+            timer=Mock(),
+            _confirming_cancel=False,
+            IsModal=Mock(return_value=True),
+            EndModal=Mock(),
+        )
+        self.bind(holder, "DownloadDialog", {"_start_download", "_finish_modal"})
+        holder._start_download()
+        self.assertTrue(holder.state.finished)
+        self.assertIs(holder.state.error, self.failure)
+        holder._run_download.assert_not_called()
+        holder._finish_modal()
+        holder.timer.Stop.assert_called_once_with()
+        holder.EndModal.assert_called_once_with(self.wx.ID_CANCEL)
+
+    def test_thread_constructor_failure_is_also_captured(self):
+        self.threading.Thread.side_effect = self.failure
+        for class_name, method, target in (
+            ("OperationDialog", "_start_worker", "_run_worker"),
+            ("DownloadDialog", "_start_download", "_run_download"),
+        ):
+            with self.subTest(class_name=class_name):
+                holder = SimpleNamespace(state=OperationState(), **{target: Mock()})
+                self.bind(holder, class_name, {method})
+                getattr(holder, method)()
+                self.assertTrue(holder.state.finished)
+                self.assertIs(holder.state.error, self.failure)
+                getattr(holder, target).assert_not_called()
+
+    def test_successful_worker_start_does_not_mark_operation_finished(self):
+        self.threading.Thread.return_value.start.side_effect = None
+        for class_name, method, target in (
+            ("OperationDialog", "_start_worker", "_run_worker"),
+            ("DownloadDialog", "_start_download", "_run_download"),
+        ):
+            with self.subTest(class_name=class_name):
+                holder = SimpleNamespace(state=OperationState(), **{target: Mock()})
+                self.bind(holder, class_name, {method})
+                getattr(holder, method)()
+                self.assertFalse(holder.state.finished)
+                self.assertIsNone(holder.state.error)
+                self.threading.Thread.assert_called_with(
+                    target=getattr(holder, target), daemon=True
+                )
+                getattr(holder, target).assert_not_called()
+
+    def test_started_worker_error_still_waits_for_modal_completion(self):
+        for class_name, starter in (
+            ("OperationDialog", "_start_worker"),
+            ("StartupSplash", "_start_imports"),
+        ):
+            with self.subTest(class_name=class_name):
+                self.wx.reset_mock()
+                holder = SimpleNamespace(
+                    cfg={},
+                    parent=None,
+                    title="Synthetic operation",
+                    msg="Synthetic message",
+                    state=OperationState(),
+                    error=None,
+                    finished=False,
+                    cancel_requested=False,
+                    _confirm_cancel=Mock(),
+                    _=lambda key: key,
+                )
+
+                def record_error_before_worker_finishes(holder=holder, starter=starter):
+                    if starter == "_start_worker":
+                        holder.state.error = self.failure
+                    else:
+                        holder.error = self.failure
+                    return True
+
+                def complete_during_modal(holder=holder, starter=starter):
+                    if starter == "_start_worker":
+                        self.assertFalse(holder.state.finished)
+                        holder.state.finished_event.set()
+                    else:
+                        self.assertFalse(holder.finished)
+                        holder.finished = True
+                    return self.wx.ID_CANCEL
+
+                def destroy_after_completion(holder=holder, starter=starter):
+                    self.assertTrue(
+                        holder.state.finished if starter == "_start_worker" else holder.finished
+                    )
+
+                self.wx.Dialog.return_value.ShowModal.side_effect = complete_during_modal
+                self.wx.Dialog.return_value.Destroy.side_effect = destroy_after_completion
+                setattr(holder, starter, record_error_before_worker_finishes)
+                self.bind(holder, class_name, {"ShowModal"})
+                holder.ShowModal()
+                holder.dialog.ShowModal.assert_called_once_with()
+                holder.dialog.Destroy.assert_called_once_with()
 
 
 class CompletionFocusTests(unittest.TestCase):

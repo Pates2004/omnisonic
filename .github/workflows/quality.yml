@@ -17,7 +17,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install quality tools
-        run: python -m pip install "ruff>=0.11" "pytest>=8" numpy soundfile "num2words>=0.5.14"
+        run: python -m pip install "ruff>=0.11" "pytest>=8" numpy soundfile pydub "num2words>=0.5.14"
       - name: Lint Python code
         run: ruff check omnivoice omnisonic tests wx_app.py installer_runtime.py
       - name: Check formatting

@@ -46,6 +46,27 @@ Write-SwitchJson $sourceSettings @{
 Write-SwitchJson (Join-Path $SwitchRoot 'presets\voice.pt') @{ sample = 'new voice' }
 Write-SwitchJson (Join-Path $audioFolder 'sample.wav') @{ sample = 'test audio' }
 Write-SwitchJson (Join-Path $audioFolder 'not-audio.txt') @{ sample = 'must not be copied' }
+& {
+    $variableName = 'OMNISONIC_SWITCH_PATH_TEST'
+    $oldVariable = [Environment]::GetEnvironmentVariable($variableName, 'Process')
+    [Environment]::SetEnvironmentVariable($variableName, $audioFolder, 'Process')
+    try {
+        foreach ($configuredPath in @(
+            ('"' + $audioFolder + '"'),
+            '%OMNISONIC_SWITCH_PATH_TEST%',
+            '$OMNISONIC_SWITCH_PATH_TEST',
+            '${OMNISONIC_SWITCH_PATH_TEST}'
+        )) {
+            $configuredSettings = [pscustomobject]@{ generated_audio_directory = $configuredPath }
+            Assert-Test ((Get-SwitchAudioSource $configuredSettings 'generated') -eq $audioFolder) 'Configured audio path matches application interpretation'
+        }
+        $literalPath = Join-Path $fixture 'literal $(throw injected)'
+        $literalSettings = [pscustomobject]@{ generated_audio_directory = $literalPath }
+        Assert-Test ((Get-SwitchAudioSource $literalSettings 'generated') -eq $literalPath) 'Configured paths never execute expressions'
+    } finally {
+        [Environment]::SetEnvironmentVariable($variableName, $oldVariable, 'Process')
+    }
+}
 $export = Join-Path $fixture 'export'
 Export-SwitchProfile $export $true | Out-Null
 Assert-Test (Test-Path -LiteralPath (Join-Path $export 'presets\voice.pt')) 'Preset exported'
@@ -86,7 +107,11 @@ Assert-Rejected { Import-SwitchProfile $export } 'checksum'
 Assert-Test ((Get-FileHash -LiteralPath $targetSettings).Hash -eq $before) 'Corruption rejected before mutation'
 $manifest.files[0].sha256 = $goodHash
 Write-SwitchJson $manifestPath $manifest
-foreach ($relative in @('../escape', 'C:/escape', 'presets/../../escape', 'presets/CON.pt', 'presets/a:stream', 'presets/a.')) {
+foreach ($relative in @(
+    '../escape', 'C:/escape', 'presets/../../escape', 'presets/CON.pt', 'presets/a:stream', 'presets/a.',
+    ('presets/COM' + [char]0x00b9 + '.pt'), ('presets/COM' + [char]0x00b2 + '.pt'),
+    ('presets/LPT' + [char]0x00b2 + '.pt'), ('presets/LPT' + [char]0x00b3 + '.pt')
+)) {
     Assert-Rejected { Join-SwitchChild $SwitchRoot $relative } 'Unsafe|escapes'
 }
 Assert-Rejected { Get-SwitchDestination 'env/python.exe' } 'Unexpected'
@@ -157,6 +182,36 @@ Assert-Test ((Get-FileHash -LiteralPath $targetSettings).Hash -eq $before) 'Roll
     Assert-Test ($failureMessage -match 'failed with code 9') 'Backend switch retains the native failure status'
     Assert-Test ($failureMessage -match 'launcher diagnostics') 'Backend switch refers to the actual recovery diagnostics'
     Assert-Test ($failureMessage -notmatch 'retained|was restored') 'Backend switch does not invent successful recovery'
+}
+
+& {
+    # Appending a temporary suffix must not exceed the filename component limit.
+    $longRoot = Join-Path $fixture 'long-names'
+    [IO.Directory]::CreateDirectory($longRoot) | Out-Null
+    $longSource = Join-Path $longRoot 'source.wav'
+    [IO.File]::WriteAllText($longSource, 'Synthetic audio fixture')
+    $longTarget = Join-Path $longRoot (('x' * 240) + '.wav')
+    Copy-SwitchFile $longSource $longTarget
+    Assert-Test ([IO.File]::ReadAllText($longTarget) -eq 'Synthetic audio fixture') 'Long legal filename copied'
+    Assert-Test ([IO.File]::ReadAllText($longSource) -eq 'Synthetic audio fixture') 'Long-name copy preserves source'
+}
+
+& {
+    $cleanupSource = Join-Path $fixture 'cleanup-source.wav'
+    $cleanupTarget = Join-Path $fixture 'cleanup-target.wav'
+    [IO.File]::WriteAllText($cleanupSource, 'Source fixture')
+    [IO.File]::WriteAllText($cleanupTarget, 'Existing target fixture')
+    function Move-Item {
+        param([string]$LiteralPath, [string]$Destination, [switch]$Force)
+        throw 'Original copy promotion failure'
+    }
+    function Remove-Item {
+        param([string]$LiteralPath)
+        throw 'Secondary temporary cleanup failure'
+    }
+    Assert-Rejected { Copy-SwitchFile $cleanupSource $cleanupTarget } 'Original copy promotion failure'
+    Assert-Test ([IO.File]::ReadAllText($cleanupSource) -eq 'Source fixture') 'Failed copy keeps source'
+    Assert-Test ([IO.File]::ReadAllText($cleanupTarget) -eq 'Existing target fixture') 'Failed copy keeps destination'
 }
 
 # Junctions must not escape the profile boundaries, even if the target exists.

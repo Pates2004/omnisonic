@@ -272,6 +272,16 @@ class StartupSplash:
         self.dialog = None
         self._confirming_cancel = False
 
+    def _start_imports(self):
+        try:
+            threading.Thread(target=self.DoHeavyImports, daemon=True).start()
+        except Exception as exc:
+            logging.exception("Could not start runtime dependency worker")
+            self.error = exc.with_traceback(None)
+            self.finished = True
+            return False
+        return True
+
     def _finish_custom_dialog(self):
         if self._confirming_cancel or not self.finished:
             return
@@ -317,7 +327,7 @@ class StartupSplash:
                 parent=self.parent,
                 style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT | wx.PD_SMOOTH,
             )
-            threading.Thread(target=self.DoHeavyImports, daemon=True).start()
+            self._start_imports()
             while not self.finished:
                 value = self.dialog.GetValue()
                 cont, _ = self.dialog.Update(value + 1 if value < 100 else 0)
@@ -358,8 +368,8 @@ class StartupSplash:
                 timer,
             )
             timer.Start(100)
-            threading.Thread(target=self.DoHeavyImports, daemon=True).start()
-            result = self.dialog.ShowModal()
+            started = self._start_imports()
+            result = self.dialog.ShowModal() if started else wx.ID_CANCEL
             timer.Stop()
             self.dialog.Destroy()
 
@@ -396,6 +406,16 @@ class OperationDialog:
         self.state = OperationState(name=title_key)
         self.dialog = None
         self._confirming_cancel = False
+
+    def _start_worker(self):
+        try:
+            threading.Thread(target=self._run_worker, daemon=True).start()
+        except Exception as exc:
+            logging.exception("Could not start operation worker")
+            self.state.error = exc.with_traceback(None)
+            self.state.finished_event.set()
+            return False
+        return True
 
     def _run_worker(self):
         execute_worker(self.state, self.worker_func, *self.args)
@@ -450,7 +470,7 @@ class OperationDialog:
                 parent=self.parent,
                 style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT | wx.PD_SMOOTH,
             )
-            threading.Thread(target=self._run_worker, daemon=True).start()
+            self._start_worker()
             while not self.state.finished:
                 value = self.dialog.GetValue()
                 done, total, message = self.state.get_progress()
@@ -501,8 +521,8 @@ class OperationDialog:
 
             self.dialog.Bind(wx.EVT_TIMER, update_progress, timer)
             timer.Start(100)
-            threading.Thread(target=self._run_worker, daemon=True).start()
-            self.dialog.ShowModal()
+            if self._start_worker():
+                self.dialog.ShowModal()
             timer.Stop()
             self.dialog.Destroy()
         return self.state
@@ -535,8 +555,16 @@ class DownloadDialog(wx.Dialog):
         self.Bind(wx.EVT_TIMER, self.OnTimer, self.timer)
         self.timer.Start(50)
 
-        self.t = threading.Thread(target=self._run_download, daemon=True)
-        self.t.start()
+        self._start_download()
+
+    def _start_download(self):
+        try:
+            self.t = threading.Thread(target=self._run_download, daemon=True)
+            self.t.start()
+        except Exception as exc:
+            logging.exception("Could not start model download worker")
+            self.state.error = exc.with_traceback(None)
+            self.state.finished_event.set()
 
     @property
     def succeeded(self):
@@ -2125,7 +2153,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 execute_worker(state, worker_func, *args)
                 wx.CallAfter(self.EndOperation, state, success_callback)
 
-            threading.Thread(target=wrapper, daemon=True).start()
+            try:
+                threading.Thread(target=wrapper, daemon=True).start()
+            except Exception as exc:
+                logging.exception("Could not start operation worker")
+                state.error = exc.with_traceback(None)
+                state.finished_event.set()
+                self.EndOperation(state, success_callback)
             return state
 
     def EndOperation(self, state, success_callback):

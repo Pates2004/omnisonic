@@ -140,6 +140,51 @@ class BatchTests(unittest.TestCase):
         found, _ = discover_text_files([self.directory], recursive=False)
         self.assertEqual(found, [BatchInput(a, self.directory)])
 
+    def test_deep_folders_do_not_exhaust_python_recursion(self):
+        root = self.directory / "deep"
+        root.mkdir()
+        directory = root
+        for _ in range(1050):
+            directory /= "a"
+            directory.mkdir()
+        source = directory / "input.txt"
+        source.write_text("Synthetic deep input.", encoding="utf-8")
+        found, errors = discover_text_files([root])
+        self.assertEqual(found, [BatchInput(source, root)])
+        self.assertEqual(errors, [])
+
+    def test_unreadable_folder_does_not_hide_later_siblings(self):
+        blocked = self.text_file("blocked/input.txt").parent
+        source = self.text_file("later/input.txt")
+        original_iterdir = Path.iterdir
+
+        def iterdir(path):
+            if path == blocked:
+                raise PermissionError("Synthetic folder permission error")
+            return original_iterdir(path)
+
+        with patch.object(Path, "iterdir", iterdir):
+            found, errors = discover_text_files([self.directory])
+        self.assertEqual(found, [BatchInput(source, self.directory)])
+        self.assertEqual(errors, [(str(blocked), "Synthetic folder permission error")])
+
+    def test_folder_discovery_cancellation_is_not_reported_as_an_input_error(self):
+        self.text_file("first/a.txt")
+        self.text_file("second/b.txt")
+        state = OperationState()
+        calls = 0
+
+        def check_cancelled():
+            nonlocal calls
+            calls += 1
+            if calls == 4:
+                state.request_cancel()
+            state.check_cancelled()
+
+        with self.assertRaises(OperationCancelled):
+            discover_text_files([self.directory], check_cancelled=check_cancelled)
+        self.assertEqual(calls, 4)
+
     def test_missing_unsupported_and_link_inputs_are_reported(self):
         unsupported = self.text_file("unsupported.pdf")
         found, errors = discover_text_files([unsupported, self.directory / "missing.txt"])
