@@ -22,7 +22,12 @@ class ModelLifecycle:
             return
         if self.asr_model_name != name:
             self._reference_cache.clear()
-        if self.asr_model_name is not None and self.asr_model_name != name:
+        if self.asr_model_name != name and (
+            self.asr_model_name is not None or self.asr_pipe is not None
+        ):
+            # A default-name operation can leave a detached Whisper pipeline
+            # before an explicit setting has ever been recorded. Its unknown
+            # identity must not be relabeled/reused as the newly selected model.
             self.release_asr()
         self.asr_model_name = name
         if self.model is not None:

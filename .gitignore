@@ -39,9 +39,11 @@ start.bat
 /env.new/
 /env.old/
 /env.failed/
+/env.retained-*/
 /venv.new/
 /venv.old/
 /venv.failed/
+/venv.retained-*/
 /.launcher/
 
 # One-off local migration scripts are not application source.

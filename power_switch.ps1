@@ -125,6 +125,20 @@ function Get-SwitchAudioSource {
     if ([regex]::Matches($path, '"').Count -eq 2 -and $path.StartsWith('"') -and $path.EndsWith('"')) {
         $path = $path.Substring(1, $path.Length - 2)
     }
+    # Windows os.path.expanduser runs before variable expansion in the desktop.
+    # Treat '~' as home-directory shorthand, never as PowerShell source text.
+    $homeMatch = [regex]::Match($path, '^~([^\\/]*)(.*)$')
+    if ($homeMatch.Success) {
+        $profileBase = [Environment]::GetEnvironmentVariable('USERPROFILE', 'Process')
+        if (-not $profileBase -and $env:HOMEPATH) { $profileBase = $env:HOMEDRIVE + $env:HOMEPATH }
+        $account = $homeMatch.Groups[1].Value
+        if ($profileBase -and $account -and $account -cne $env:USERNAME) {
+            if ([IO.Path]::GetFileName($profileBase.TrimEnd('\', '/')) -ceq $env:USERNAME) {
+                $profileBase = [IO.Path]::Combine([IO.Path]::GetDirectoryName($profileBase.TrimEnd('\', '/')), $account)
+            } else { $profileBase = $null }
+        }
+        if ($profileBase) { $path = $profileBase + $homeMatch.Groups[2].Value }
+    }
     $path = [regex]::Replace($path, '\$(?:\{([^}]+)\}|([A-Za-z_][A-Za-z0-9_]*))|%([^%]+)%',
         [Text.RegularExpressions.MatchEvaluator]{
             param($pathMatch)
@@ -282,11 +296,28 @@ function Import-SwitchProfile {
 }
 
 function Assert-SwitchAppClosed {
-    $processes = Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'"
+    $processes = Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe' OR Name='omnisonic.exe'"
     foreach ($process in $processes) {
-        if ($process.CommandLine -match '\bomnisonic\.(?:app|startup)\b|(?:^|[\\/\s"])wx_app\.py(?:["\s]|$)') {
+        if ($process.Name -ieq 'omnisonic.exe' -or
+            $process.CommandLine -match '\bomnisonic\.(?:app|startup)\b|(?:^|[\\/\s"])wx_app\.py(?:["\s]|$)') {
             throw 'Close OmniSonic before using Power Switch / Najpierw zamknij OmniSonic.'
         }
+    }
+}
+
+function Enter-SwitchProfileLock {
+    # Match desktop_launcher.ps1 so startup and profile writes cannot overlap.
+    $directory = Assert-SwitchPath (Join-Path $SwitchRoot '.launcher')
+    $lockPath = Assert-SwitchPath (Join-Path $directory 'runtime.lock')
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    try {
+        return [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    } catch [IO.IOException] {
+        if (($_.Exception.HResult -band 0xFFFF) -in @(32, 33)) {
+            throw 'Another launcher or Power Switch is using this project. Wait for it to finish. / Projekt jest zajety przez launcher lub Power Switch. Poczekaj na zakonczenie operacji.'
+        }
+        throw
     }
 }
 
@@ -315,21 +346,30 @@ function Invoke-PowerSwitch {
             default { return }
         }
     }
-    Assert-SwitchAppClosed
-    switch ($Action) {
-        'Switch' { Invoke-SwitchBackend $Backend }
-        'Export' {
-            if (-not $ProfilePath) { $ProfilePath = New-SwitchFolder 'export' }
-            Export-SwitchProfile $ProfilePath $IncludeAudio | Out-Null
-        }
-        'Import' {
-            if (-not $ProfilePath) { throw 'Provide -ProfilePath with the exported folder.' }
-            Write-Host 'Import merges presets, replaces matching files/settings, and resets audio paths to this PC Documents.'
-            Write-Host 'Import scala presety, zastepuje kolidujace pliki i ustawia foldery audio w Dokumentach tego komputera.'
-            if (-not $Yes -and (Read-Host 'Continue? / Kontynuowac? [y/N]') -notmatch '^(y|t|yes|tak)$') { return }
-            Import-SwitchProfile $ProfilePath | Out-Null
-        }
+    if ($Action -eq 'Switch') {
+        Assert-SwitchAppClosed
+        # The delegated launcher owns its lock; never hold it across this call.
+        Invoke-SwitchBackend $Backend
+        return
     }
+    $profileLock = Enter-SwitchProfileLock
+    try {
+        # Check after acquiring the startup lock, closing the check/start race.
+        Assert-SwitchAppClosed
+        switch ($Action) {
+            'Export' {
+                if (-not $ProfilePath) { $ProfilePath = New-SwitchFolder 'export' }
+                Export-SwitchProfile $ProfilePath $IncludeAudio | Out-Null
+            }
+            'Import' {
+                if (-not $ProfilePath) { throw 'Provide -ProfilePath with the exported folder.' }
+                Write-Host 'Import merges presets, replaces matching files/settings, and resets audio paths to this PC Documents.'
+                Write-Host 'Import scala presety, zastepuje kolidujace pliki i ustawia foldery audio w Dokumentach tego komputera.'
+                if (-not $Yes -and (Read-Host 'Continue? / Kontynuowac? [y/N]') -notmatch '^(y|t|yes|tak)$') { return }
+                Import-SwitchProfile $ProfilePath | Out-Null
+            }
+        }
+    } finally { $profileLock.Dispose() }
 }
 
 if ($MyInvocation.InvocationName -eq '.') { return }

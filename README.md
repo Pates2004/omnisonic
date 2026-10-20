@@ -160,6 +160,17 @@ Runtime replacement is transactional. The launcher prepares and validates
 `env.new/` or `venv.new/` before activating it, and keeps the previously working
 runtime as `env.old/` or `venv.old/`. A failed staging install never replaces the
 active environment.
+An already existing `.old` backup is temporarily moved to a unique
+`.retained-*` sibling, not erased before final-path validation. Failed activation
+restores the original active runtime and its original backup whenever files are
+not in use. Recovery obstacles report the exact retained locations; a cleanup
+failure after successful validation is a warning, not a false installation failure.
+These managed runtime backups are ignored by Git.
+
+Po polsku: zastana kopia `.old` nie jest kasowana przed sprawdzeniem nowego
+środowiska w docelowym miejscu. Na czas zamiany trafia do `.retained-*`.
+Nieudana aktywacja przywraca wcześniejsze środowisko i jego kopię, o ile pliki
+nie są używane. Przy przeszkodzie launcher podaje zachowane ścieżki odzyskiwania.
 If a previous activation was interrupted between renames, the surviving `.old`
 environment is retained for recovery rather than deleted. An unavailable or broken
 system Python is treated as a repairable interpreter failure, not a fatal probe error.
@@ -377,6 +388,18 @@ then select Import there. Exports/backups contain private voice data and are
 ignored by Git. They are never automatically deleted. Import verifies SHA-256,
 rejects traversal paths and links/junctions, and rolls back failed file copies.
 
+Profile import/export shares the launcher's project lock, preventing transfer
+while another launcher or Power Switch is modifying this installation. Close
+the application first, including an instance started with the installed
+`omnisonic.exe` command. Backend switching delegates locking to the launcher.
+Audio paths interpret Copy-as-path quotes, environment variables and `~`
+home-directory shorthand consistently with the desktop.
+
+Po polsku: import i eksport profilu korzystają z blokady projektu wspólnej
+z launcherem. Nie nakładają się na uruchamianie ani drugi transfer. Najpierw
+zamknij aplikację, również uruchomioną przez `omnisonic.exe`. Ścieżki audio
+rozpoznają cudzysłowy, zmienne środowiskowe i skrót `~` do katalogu użytkownika.
+
 Import remaps output folders to the destination user's actual Windows Documents
 location: `OmniSonic/generated` and `OmniSonic/record`. Python, drivers, cached
 models, temporary microphone references and old backend preferences are not
@@ -470,6 +493,14 @@ resamples reference audio when needed. If recording or saving fails after sample
 have been captured, they stay in memory: **Retry saving recording** (also Ctrl+R)
 opens Save As. Cancelling or failing that retry keeps the samples. Closing the
 program with an active or unsaved recording always asks before discarding it.
+To continue without saving the take, choose **Program > Discard unsaved
+recording...** and confirm. This discards only the in-memory microphone take;
+it never deletes a loaded or saved audio file.
+
+Po polsku: jeśli nie chcesz zachowywać niezapisanego nagrania, wybierz
+**Program > Odrzuć niezapisane nagranie...** i potwierdź. Usuwana jest wyłącznie
+bieżąca próbka z pamięci, nie pliki audio na dysku.
+
 Recording and model operations cannot run simultaneously in the same window.
 Each application session has its own temporary reference WAV, so another open
 instance cannot overwrite or remove it. Temporary files from previous sessions

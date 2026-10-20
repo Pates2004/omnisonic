@@ -260,8 +260,8 @@
     "transcribe_complete": "Transkrypcja źródłowego nagrania została zakończona.",
     "op_transcribe_title": "Transkrypcja nagrania",
     "op_transcribe_msg": "Rozpoznawanie tekstu źródłowego nagrania...",
-    "clone_instruct": "Dodatkowa instrukcja głosu dla klonowania (opcjonalna):",
-    "design_custom_instruct": "Dodatkowa własna instrukcja projektowanego głosu (opcjonalna):",
+    "clone_instruct": "Dodatkowe znaczniki cech głosu (opcjonalne, oddzielone przecinkami):",
+    "design_custom_instruct": "Dodatkowe znaczniki cech projektowanego głosu (opcjonalne, oddzielone przecinkami):",
     "t_shift": "Przesunięcie harmonogramu t_shift (domyślnie 0.1):",
     "layer_penalty_factor": "Kara warstw kodera (domyślnie 5.0):",
     "position_temperature": "Temperatura wyboru pozycji (domyślnie 5.0):",
@@ -357,5 +357,12 @@
     "subtitle_audio_overflow": "Pozycja napisów {index}: wygenerowane audio trwa {actual_seconds:.6f} s, a dostępny czas to {available_seconds:.6f} s. Wydłuż przedział albo podziel tekst; mowa nie została ucięta.",
     "subtitle_generation_failed": "Nie udało się wygenerować pozycji napisów {index}: {error}",
     "subtitle_invalid_sample_rate": "Model zwrócił nieprawidłową częstotliwość próbkowania audio.",
-    "subtitle_output_too_large": "Ta ścieżka napisów przekroczyłaby obsługiwany rozmiar pliku WAV. Podziel napisy albo użyj niższej częstotliwości próbkowania."
+    "subtitle_output_too_large": "Ta ścieżka napisów przekroczyłaby obsługiwany rozmiar pliku WAV. Podziel napisy albo użyj niższej częstotliwości próbkowania.",
+    "record_discard": "Odrzuć niezapisane nagranie...",
+    "record_discard_confirm": "Odrzucić bieżące niezapisane audio z mikrofonu? Nie można tego cofnąć. Wcześniej wczytane lub zapisane pliki audio nie zostaną usunięte.",
+    "record_discarded": "Odrzucono niezapisane nagranie z mikrofonu.",
+    "voice_attributes_help_title": "Znaczniki cech głosu",
+    "voice_attributes_help_body": "OmniVoice przyjmuje obsługiwane znaczniki cech wymienione poniżej, oddzielone przecinkami. Przykład: female, young adult, whisper. Swobodne opisy, takie jak 'spokojny lektor', nie są obsługiwane. Używaj tylko jednej wartości z każdej kategorii. Nie łącz sprzecznych wartości, takich jak male i female. Wybory z list i dodatkowe znaczniki są łączone. Wymagana jest angielska lub chińska pisownia znaczników, również przy polskim interfejsie.\n\n{tags}",
+    "voice_instruction_invalid": "Nieobsługiwane lub sprzeczne znaczniki cech głosu. Zobacz Pomoc > Znaczniki cech głosu.\n\n{error}",
+    "voice_instruction_not_ready": "Sprawdzanie cech głosu jest niedostępne. Uruchom OmniSonic ponownie, aby wczytać biblioteki AI."
 }

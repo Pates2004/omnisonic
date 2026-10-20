@@ -178,6 +178,8 @@ class BatchTabMixin:
                 self.batch_output.SetValue(dialog.GetPath())
 
     def OnGenBatch(self, event):
+        if not self._CanStartGeneration():
+            return
         if not self._CanUseModel():
             wx.MessageBox(self._("msg_load_first"), self._("error_title"), parent=self)
             return
@@ -241,6 +243,8 @@ class BatchTabMixin:
         else:
             instruction = ""
         if instruction:
+            if not self._CheckVoiceInstruction(instruction):
+                return
             kwargs["instruct"] = instruction
         root = self.batch_output.GetValue()
         if not normalize_pasted_path(root).strip():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import logging
 import threading
 import traceback
@@ -74,11 +75,20 @@ def execute_worker(state: OperationState, worker: Callable[..., Any], *args: Any
         logger.exception("%s failed", state.name)
         # Keep the error message, not model/tensor references in worker frames.
         seen = set()
-        error = exc
-        while error is not None and id(error) not in seen:
+        pending = [exc]
+        while pending:
+            error = pending.pop()
+            if id(error) in seen:
+                continue
             seen.add(id(error))
             traceback.clear_frames(error.__traceback__)
-            error = error.__cause__ or error.__context__
+            # An explicit cause can differ from the hidden exception context;
+            # either branch (or a grouped child) may hold model/tensor frames.
+            pending.extend(
+                item for item in (error.__cause__, error.__context__) if item is not None
+            )
+            if isinstance(error, getattr(builtins, "BaseExceptionGroup", ())):
+                pending.extend(error.exceptions)
     finally:
         state.finished_event.set()
     return state

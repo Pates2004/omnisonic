@@ -122,6 +122,29 @@ def main():
         for index, audio in enumerate(paired):
             assert audio.size > 0 and np.isfinite(audio).all()
             sf.write(args.output / f"paired-reference-{index}.wav", audio, model.sampling_rate)
+        from types import SimpleNamespace
+
+        import omnisonic.app as desktop
+        from omnivoice.utils.voice_design import resolve_instruct
+
+        desktop.LoadRuntimeDependencies()
+        assert desktop.resolve_voice_instruction is resolve_instruct
+        attributes = "Female, female, 女, whisper, 耳语"
+        assert resolve_instruct(attributes) == "female, whisper"
+        assert desktop.OmniVoiceFrame._CheckVoiceInstruction(
+            SimpleNamespace(_=lambda key: key), attributes
+        )
+        designed = model.generate(
+            text="This tests supported voice attributes and equivalent repeated tags.",
+            language="en",
+            instruct=attributes,
+            duration=3.0,
+            generation_config=OmniVoiceGenerationConfig(
+                num_step=16, audio_chunk_duration=0, pad_duration=0, postprocess_output=False
+            ),
+        )[0]
+        assert designed.size > 0 and np.isfinite(designed).all()
+        sf.write(args.output / "designed-attributes.wav", designed, model.sampling_rate)
         (args.output / "regression-inputs.json").write_text(
             json.dumps(
                 {
@@ -134,6 +157,8 @@ def main():
                     "disabled_chunking": "passed",
                     "optional_speed": "passed",
                     "paired_references": "passed",
+                    "voice_attributes": "passed",
+                    "desktop_validator_binding": "passed",
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -141,6 +166,9 @@ def main():
             encoding="utf-8",
         )
         print("Real normalization, CFG zero, disabled chunking and paired references: OK")
+        print(
+            "Real supported voice attributes, repeated aliases and desktop validation binding: OK"
+        )
 
 
 if __name__ == "__main__":

@@ -18,8 +18,9 @@ function Assert-Rejected {
 
 Assert-Test ($SwitchData -eq (Join-Path $SwitchRoot 'config')) 'Power Switch uses program/config'
 & {
+    $detectedProcessName = 'pythonw.exe'
     function Get-CimInstance {
-        return [pscustomobject]@{ Name = 'pythonw.exe'; CommandLine = $commandLine }
+        return [pscustomobject]@{ Name = $detectedProcessName; CommandLine = $commandLine }
     }
     foreach ($commandLine in @(
         'pythonw.exe -E -s -m omnisonic.startup',
@@ -31,6 +32,9 @@ Assert-Test ($SwitchData -eq (Join-Path $SwitchRoot 'config')) 'Power Switch use
     foreach ($commandLine in @('python.exe -m unrelated.app', 'python.exe -m omnisonic.application', $null)) {
         Assert-SwitchAppClosed
     }
+    $detectedProcessName = 'omnisonic.exe'
+    $commandLine = '"C:\synthetic-app\venv\Scripts\omnisonic.exe"'
+    Assert-Rejected { Assert-SwitchAppClosed } 'Close OmniSonic'
 }
 $fixture = Join-ProjectMaterialPath $SwitchRoot ('trash\power-switch-tests-' + [Guid]::NewGuid().ToString('N'))
 $SwitchRoot = Join-Path $fixture 'old-pc'
@@ -39,6 +43,19 @@ $SwitchDocuments = Join-Path $fixture 'old-documents'
 $SwitchBackups = Join-Path $fixture 'backups'
 $audioFolder = Join-Path $fixture 'custom-audio'
 $sourceSettings = Join-Path $SwitchData 'settings.json'
+& {
+    # Interpret the desktop's supported home-directory shorthand as a path,
+    # without creating, reading or copying any actual profile/audio file.
+    $profileBase = $env:USERPROFILE
+    if ($profileBase) {
+        foreach ($configuredPath in @('~\voices', '~/voices', '"~\voices"')) {
+            $configuredSettings = [pscustomobject]@{ generated_audio_directory = $configuredPath }
+            $expected = [IO.Path]::GetFullPath((Join-Path $profileBase 'voices'))
+            Assert-Test ((Get-SwitchAudioSource $configuredSettings 'generated') -eq $expected) 'Home shorthand matches desktop interpretation'
+        }
+        Assert-Rejected { Get-SwitchAudioSource ([pscustomobject]@{ generated_audio_directory = '~' }) 'generated' } 'too broad'
+    }
+}
 Write-SwitchJson $sourceSettings @{
     language = 'pl'; theme = 'dark'; shortcut_bindings = @{ generate = 'Ctrl+G' }
     generated_audio_directory = $audioFolder; recorded_audio_directory = $audioFolder
@@ -77,6 +94,62 @@ Export-SwitchProfile $noAudio $false | Out-Null
 Assert-Test (-not (Test-Path -LiteralPath (Join-Path $noAudio 'audio'))) 'Audio is optional'
 Assert-Rejected { Export-SwitchProfile $export $false } 'non-existing'
 Assert-Rejected { Export-SwitchProfile (Join-Path $SwitchRoot 'presets\nested-export') $false } 'inside data'
+
+& {
+    # A launcher that is starting has not created a detectable GUI process yet.
+    # Profile transfers must share its project lock, not rely only on a PID scan.
+    $Action = 'Export'
+    $IncludeAudio = $false
+    $ProfilePath = Join-Path $fixture 'export-with-lock'
+    $lockDirectory = Join-Path $SwitchRoot '.launcher'
+    [IO.Directory]::CreateDirectory($lockDirectory) | Out-Null
+    $held = [IO.File]::Open((Join-Path $lockDirectory 'runtime.lock'),
+        [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    try {
+        Assert-Rejected { Invoke-PowerSwitch } 'using this project|zajety'
+        Assert-Test (-not (Test-Path -LiteralPath $ProfilePath)) 'Busy launcher prevents profile writes'
+    } finally { $held.Dispose() }
+    Invoke-PowerSwitch
+    Assert-Test (Test-Path -LiteralPath (Join-Path $ProfilePath 'manifest.json')) 'Transfer succeeds after launcher releases lock'
+
+    function Export-SwitchProfile {
+        param($Destination, $WithAudio)
+        $blocked = $false
+        try {
+            $unexpected = [IO.File]::Open((Join-Path $lockDirectory 'runtime.lock'),
+                [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+            $unexpected.Dispose()
+        } catch [IO.IOException] {
+            $blocked = ($_.Exception.HResult -band 0xFFFF) -in @(32, 33)
+        }
+        Assert-Test $blocked 'Profile lock remains held throughout transfer'
+        throw 'Simulated profile transfer failure'
+    }
+    Assert-Rejected { Invoke-PowerSwitch } 'Simulated profile transfer failure'
+    $released = [IO.File]::Open((Join-Path $lockDirectory 'runtime.lock'),
+        [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $released.Dispose()
+
+    $Action = 'Import'
+    $Yes = $false
+    function Read-Host { return 'n' }
+    function Import-SwitchProfile { throw 'Declined import must not write anything' }
+    Invoke-PowerSwitch
+    $released = [IO.File]::Open((Join-Path $lockDirectory 'runtime.lock'),
+        [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $released.Dispose()
+
+    $Action = 'Switch'
+    $Backend = 'CPU'
+    function Invoke-SwitchBackend {
+        param($SelectedBackend)
+        Assert-Test ($SelectedBackend -eq 'CPU') 'Backend choice reaches delegated launcher'
+        $delegated = [IO.File]::Open((Join-Path $lockDirectory 'runtime.lock'),
+            [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $delegated.Dispose()
+    }
+    Invoke-PowerSwitch
+}
 
 $SwitchRoot = Join-Path $fixture 'new-pc'
 $SwitchData = Join-Path $SwitchRoot 'config'

@@ -24,9 +24,11 @@ def main():
 
     import omnisonic.app as desktop
     from omnisonic.config import DEFAULT_CONFIG
+    from omnivoice.utils.voice_design import resolve_instruct
     from tests.test_prompt_cache import Prompt, Tokens
 
     desktop.np = np
+    desktop.resolve_voice_instruction = resolve_instruct
     desktop.OmniVoiceGenerationConfig = SimpleNamespace
     application = wx.App(False)
     application.SetExitOnFrameDelete(False)
@@ -38,6 +40,7 @@ def main():
         _asr_pipe = None
 
         def generate(self, **kwargs):
+            resolve_instruct(kwargs.get("instruct"))
             calls.append(kwargs)
             if kwargs["text"] == "Plain text.":
                 return [np.full(2400, 0.1, dtype=np.float32)]
@@ -93,7 +96,7 @@ def main():
                 frame.model = Model()
                 frame.clone_ref_audio.SetValue(str(reference))
                 frame.clone_ref_text.SetValue("Reference.")
-                frame.design_custom_instruct.SetValue("Calm narrator")
+                frame.design_custom_instruct.SetValue("whisper")
                 frame.batch_output.SetValue(f'"{scratch / (language + " narration output")}"')
                 frame.notebook.SetSelection(frame.notebook.FindPage(frame.tab_batch))
                 assert frame.batch_list.GetName() == frame._("batch_queue")

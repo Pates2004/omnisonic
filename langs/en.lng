@@ -260,8 +260,8 @@
     "transcribe_complete": "Reference audio transcription completed.",
     "op_transcribe_title": "Audio transcription",
     "op_transcribe_msg": "Recognizing the reference audio transcript...",
-    "clone_instruct": "Additional voice instruction for cloning (optional):",
-    "design_custom_instruct": "Additional custom voice-design instruction (optional):",
+    "clone_instruct": "Additional voice attribute tags (optional, comma-separated):",
+    "design_custom_instruct": "Additional voice-design attribute tags (optional, comma-separated):",
     "t_shift": "Noise-schedule t_shift (default 0.1):",
     "layer_penalty_factor": "Codebook layer penalty (default 5.0):",
     "position_temperature": "Position-selection temperature (default 5.0):",
@@ -357,5 +357,12 @@
     "subtitle_audio_overflow": "Subtitle {index}: generated audio lasts {actual_seconds:.6f} s, but only {available_seconds:.6f} s are available. Increase the cue duration or split the text; speech was not trimmed.",
     "subtitle_generation_failed": "Subtitle {index} could not be generated: {error}",
     "subtitle_invalid_sample_rate": "The model returned an invalid audio sample rate.",
-    "subtitle_output_too_large": "This subtitle track would exceed the supported WAV file size. Split the subtitles or use a lower sample rate."
+    "subtitle_output_too_large": "This subtitle track would exceed the supported WAV file size. Split the subtitles or use a lower sample rate.",
+    "record_discard": "Discard unsaved recording...",
+    "record_discard_confirm": "Discard the current unsaved microphone audio? This cannot be undone. Previously loaded or saved audio files will not be deleted.",
+    "record_discarded": "Unsaved microphone recording discarded.",
+    "voice_attributes_help_title": "Voice attribute tags",
+    "voice_attributes_help_body": "OmniVoice accepts the supported attribute tags listed below, separated by commas. Example: female, young adult, whisper. Free-form descriptions such as 'calm narrator' are not supported. Use only one value from each category. Do not combine conflicting values such as male and female. Dropdown selections and additional tags are combined. The English/Chinese tag spelling is required even when the interface is translated.\n\n{tags}",
+    "voice_instruction_invalid": "Unsupported or conflicting voice attribute tags. See Help > Voice attribute tags.\n\n{error}",
+    "voice_instruction_not_ready": "Voice attribute validation is unavailable. Restart OmniSonic to load its AI libraries."
 }

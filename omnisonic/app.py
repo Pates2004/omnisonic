@@ -62,6 +62,7 @@ OmniVoiceGenerationConfig = None
 VoiceClonePrompt = None
 load_waveform = None
 accelerator_info = None
+resolve_voice_instruction = None
 
 _ALL_LANGUAGES = ["Auto"]
 
@@ -232,6 +233,7 @@ def _shortcut_from_key_event(event):
 def LoadRuntimeDependencies():
     global torch, np, sf, sd, OmniVoice, OmniVoiceGenerationConfig
     global VoiceClonePrompt, load_waveform, accelerator_info, _ALL_LANGUAGES
+    global resolve_voice_instruction
 
     logging.info("Loading OmniSonic runtime dependencies")
     import numpy as _np
@@ -243,6 +245,7 @@ def LoadRuntimeDependencies():
     from omnivoice import VoiceClonePrompt as _VCP
     from omnivoice.utils.audio import load_waveform as _load_waveform
     from omnivoice.utils.lang_map import LANG_NAMES, lang_display_name
+    from omnivoice.utils.voice_design import resolve_instruct
 
     np = _np
     sd = _sd
@@ -252,6 +255,7 @@ def LoadRuntimeDependencies():
     OmniVoiceGenerationConfig = _OVC
     VoiceClonePrompt = _VCP
     load_waveform = _load_waveform
+    resolve_voice_instruction = resolve_instruct
     accelerator_info = detect_accelerator(_torch)
     logging.info(
         "OmniSonic runtime ready: backend=%s, device=%s",
@@ -1870,6 +1874,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
         self.item_record = progMenu.Append(wx.ID_ANY, self._("menu_record"))
         self.Bind(wx.EVT_MENU, self.OnShortcutRecord, self.item_record)
+        self.item_discard_recording = progMenu.Append(wx.ID_ANY, self._("record_discard"))
+        self.Bind(wx.EVT_MENU, self.OnDiscardRecording, self.item_discard_recording)
+        self.item_discard_recording.Enable(False)
 
         self.item_play_pause = progMenu.Append(wx.ID_ANY, self._("menu_play_pause"))
         self.Bind(wx.EVT_MENU, self.OnShortcutPlayPause, self.item_play_pause)
@@ -1902,6 +1909,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.Bind(wx.EVT_MENU, self.OnShowTags, item_tags)
         item_subtitles = helpMenu.Append(wx.ID_ANY, self._("subtitle_help_title"))
         self.Bind(wx.EVT_MENU, self.OnShowSubtitleHelp, item_subtitles)
+        item_attributes = helpMenu.Append(wx.ID_ANY, self._("voice_attributes_help_title"))
+        self.Bind(wx.EVT_MENU, self.OnShowVoiceAttributes, item_attributes)
         menubar.Append(helpMenu, self._("menu_help"))
 
         self.SetMenuBar(menubar)
@@ -2101,6 +2110,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             control = getattr(self, name, None)
             if control:
                 control.Enable(enabled)
+        if hasattr(self, "item_discard_recording"):
+            self.item_discard_recording.Enable(enabled and recording_busy)
 
     def _complete_operation(self, state, success_callback):
         was_released = self._models.collect_if_needed() and self.model is None
@@ -2898,6 +2909,11 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     def OnToggleModel(self, event):
         if self.current_op is not None:
             return
+        # A deferred startup attempt must not override an explicit load/unload.
+        timer = getattr(self, "_autoload_timer", None)
+        if timer is not None:
+            timer.Stop()
+            self._autoload_timer = None
         if self.model is None:
 
             def on_success(_result):
@@ -2980,13 +2996,25 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             fade_duration=self.spin_fade_duration.GetValue(),
         )
 
+    def _CanStartGeneration(self):
+        recording_busy = getattr(self, "rec_stream", None) is not None or bool(
+            getattr(self, "rec_data", ())
+        )
+        if self.current_op is not None or recording_busy:
+            wx.Bell()
+            return False
+        return True
+
     def _prepare_generation(self):
+        if not self._CanStartGeneration():
+            return False
         self.OnStopAudio(None)
         self.audio_data = None
         self.btn_play.Disable()
         self.btn_save.Disable()
         self.item_play_pause.Enable(False)
         self.item_save_result.Enable(False)
+        return True
 
     def _CheckTextNormalization(self, language):
         if not self.cfg.get("normalize_text", False):
@@ -3001,6 +3029,21 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 return True
             except TextNormalizationError as exc:
                 message = operation_error_message(exc, self._)
+        wx.MessageBox(message, self._("error_title"), wx.OK | wx.ICON_ERROR, parent=self)
+        return False
+
+    def _CheckVoiceInstruction(self, instruct):
+        if not instruct or not instruct.strip():
+            return True
+        if resolve_voice_instruction is None:
+            message = self._("voice_instruction_not_ready")
+        else:
+            try:
+                resolve_voice_instruction(instruct)
+            except ValueError as exc:
+                message = self._("voice_instruction_invalid").format(error=str(exc))
+            else:
+                return True
         wx.MessageBox(message, self._("error_title"), wx.OK | wx.ICON_ERROR, parent=self)
         return False
 
@@ -3075,7 +3118,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             )
             return
 
-        self._prepare_generation()
+        if not self._CheckVoiceInstruction(instruct):
+            return
+        if not self._prepare_generation():
+            return
         self.RunModelOperation(
             "op_gen_title",
             "op_gen_msg",
@@ -3188,7 +3234,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if not self._CheckTextNormalization(lang):
             return
 
-        self._prepare_generation()
+        if not self._prepare_generation():
+            return
         self.RunModelOperation(
             "op_auto_title",
             "op_auto_msg",
@@ -3252,7 +3299,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
         instruct = ", ".join(instructs) if instructs else None
 
-        self._prepare_generation()
+        if not self._CheckVoiceInstruction(instruct):
+            return
+        if not self._prepare_generation():
+            return
         self.RunModelOperation(
             "op_gen_title",
             "op_gen_msg",
@@ -3939,8 +3989,53 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         wx.Bell()
         return True
 
+    def OnDiscardRecording(self, event):
+        if (
+            self.current_op is not None
+            or getattr(self, "_closing", False)
+            or getattr(self, "_confirming_close", False)
+            or getattr(self, "_confirming_discard_recording", False)
+        ):
+            return
+        stream, chunks = self.rec_stream, self.rec_data
+        if stream is None and not chunks:
+            return
+        dialog = wx.MessageDialog(
+            self,
+            self._("record_discard_confirm"),
+            self._("warning_title"),
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
+        )
+        self._confirming_discard_recording = True
+        try:
+            confirmed = dialog.ShowModal() == wx.ID_YES
+        finally:
+            dialog.Destroy()
+            self._confirming_discard_recording = False
+        if not confirmed or self.rec_stream is not stream or self.rec_data is not chunks:
+            return
+        try:
+            self._CloseRecording()
+        except Exception as exc:
+            wx.MessageBox(
+                self._("record_failed_kept").format(error=str(exc)),
+                self._("error_title"),
+                wx.OK | wx.ICON_ERROR,
+            )
+        else:
+            # Discard only the unsaved in-memory take, never the loaded file.
+            self.rec_data = []
+            self.rec_fs = None
+            self.Log(self._("record_discarded"))
+        finally:
+            self._UpdateRecordingControls(self.btn_rec_ref)
+
     def ToggleRecord(self, btn, path_ctrl):
-        if getattr(self, "_closing", False) or getattr(self, "_confirming_close", False):
+        if (
+            getattr(self, "_closing", False)
+            or getattr(self, "_confirming_close", False)
+            or getattr(self, "_confirming_discard_recording", False)
+        ):
             return
         if self.current_op is not None:
             wx.MessageBox(
@@ -3989,6 +4084,20 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         wx.MessageBox(
             self._("subtitle_help_body"),
             self._("subtitle_help_title"),
+            wx.OK | wx.ICON_INFORMATION,
+            parent=self,
+        )
+
+    def OnShowVoiceAttributes(self, event):
+        tags = []
+        for category, choices in _CATEGORIES.items():
+            values = [
+                _DIALECT_INSTRUCTS.get(value, value.lower()) for value in choices if value != "None"
+            ]
+            tags.append(f"{self._('cat_' + category)}: {', '.join(values)}")
+        wx.MessageBox(
+            self._("voice_attributes_help_body").format(tags="\n".join(tags)),
+            self._("voice_attributes_help_title"),
             wx.OK | wx.ICON_INFORMATION,
             parent=self,
         )

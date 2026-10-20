@@ -1,6 +1,7 @@
 """Model lifetime regressions that also run in CI without GPU libraries."""
 
 import ast
+import builtins
 import gc
 import unittest
 import weakref
@@ -243,6 +244,50 @@ class ModelLifecycleTests(unittest.TestCase):
         gc.collect()
         self.assertIsNone(first())
         self.assertEqual(len(self.pipelines), 2)
+
+    def test_explicit_asr_name_after_default_invalidates_unknown_detached_pipeline(self):
+        self.perform({}, transcription=True)
+        first = self.pipelines[0]
+        self.perform({"asr_model_name": "second"}, transcription=True)
+        gc.collect()
+        self.assertIsNone(first())
+        self.assertEqual(len(self.pipelines), 2)
+
+    def test_hidden_context_with_unrelated_explicit_cause_cannot_retain_released_model(self):
+        def fail_inside_model(model):
+            assert model is not None
+            raise ValueError("context retains model")
+
+        def worker(state, model):
+            try:
+                fail_inside_model(model)
+            except ValueError:
+                raise RuntimeError("outer failure") from LookupError("unrelated explicit cause")
+
+        with self.assertLogs("omnisonic.operations", level="ERROR"):
+            result = self.perform({"unload_omnivoice_after_operation": True}, worker)
+        self.assertIsInstance(result.error, RuntimeError)
+        self.assertIsInstance(result.error.__cause__, LookupError)
+        self.assertIsInstance(result.error.__context__, ValueError)
+        self.assertIsNone(self.loaded[0]())
+
+    @unittest.skipUnless(hasattr(builtins, "ExceptionGroup"), "Python 3.11 exception groups")
+    def test_exception_group_children_cannot_retain_released_model(self):
+        def make_inner_error(model):
+            try:
+                assert model is not None
+                raise ValueError("nested child retains model")
+            except ValueError as exc:
+                return exc
+
+        def worker(state, model):
+            raise builtins.ExceptionGroup("grouped failure", [make_inner_error(model)]) from None
+
+        with self.assertLogs("omnisonic.operations", level="ERROR"):
+            result = self.perform({"unload_omnivoice_after_operation": True}, worker)
+        self.assertIsInstance(result.error, builtins.ExceptionGroup)
+        self.assertEqual(str(result.error.exceptions[0]), "nested child retains model")
+        self.assertIsNone(self.loaded[0]())
 
     def test_explicit_unload_releases_both_models(self):
         self.perform({})

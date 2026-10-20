@@ -96,6 +96,50 @@ class ReferencePathTests(unittest.TestCase):
         frame.RunModelOperation.assert_called_once()
         self.assertEqual(frame.RunModelOperation.call_args.args[6], (None, str(self.source), None))
 
+    def test_batch_rejects_invalid_voice_attributes_before_stopping_audio_or_dispatch(self):
+        frame = self.frame
+        frame.batch_items = [BatchResult(str(self.folder / "input.txt"))]
+        frame.batch_mode.GetSelection.return_value = 0
+        frame.clone_lang.GetValue.return_value = "Auto"
+        frame.combo_presets.GetSelection.return_value = -1
+        frame.clone_instruct.GetValue.return_value = "unsupported arbitrary prose"
+        frame._CheckVoiceInstruction.return_value = False
+        frame.batch_output.GetValue.return_value = str(self.folder / "output")
+        handler(
+            "batch_ui.py",
+            "OnGenBatch",
+            wx=self.wx,
+            os=os,
+            datetime=datetime,
+            uuid4=uuid4,
+            BatchInput=BatchInput,
+        )(frame, None)
+        frame._CheckVoiceInstruction.assert_called_once_with("unsupported arbitrary prose")
+        frame.OnStopAudio.assert_not_called()
+        frame.RunModelOperation.assert_not_called()
+
+    def test_batch_rejected_start_preserves_playback_and_does_not_dispatch(self):
+        frame = self.frame
+        frame._CanStartGeneration.return_value = False
+        frame.batch_items = [BatchResult(str(self.folder / "input.txt"))]
+        frame.batch_mode.GetSelection.return_value = 0
+        frame.clone_lang.GetValue.return_value = "Auto"
+        frame.combo_presets.GetSelection.return_value = -1
+        frame.clone_instruct.GetValue.return_value = ""
+        frame.batch_output.GetValue.return_value = str(self.folder / "output")
+        handler(
+            "batch_ui.py",
+            "OnGenBatch",
+            wx=self.wx,
+            os=os,
+            datetime=datetime,
+            uuid4=uuid4,
+            BatchInput=BatchInput,
+        )(frame, None)
+        frame._CanStartGeneration.assert_called_once_with()
+        frame.OnStopAudio.assert_not_called()
+        frame.RunModelOperation.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,7 +31,7 @@ jobs:
       - name: Test subtitle timelines and central test storage
         run: python -m unittest -v tests.test_subtitles tests.test_batch_subtitles tests.test_materials
       - name: Test preference, reference path and long-text edge cases
-        run: python -m unittest -v tests.test_preferences_edges tests.test_reference_path_ui tests.test_text_chunking
+        run: python -m unittest -v tests.test_preferences_edges tests.test_reference_path_ui tests.test_text_chunking tests.test_voice_design tests.test_desktop_workflow
       - name: Test generation seeds and reference prompt reuse
         run: python -m unittest -v tests.test_randomness tests.test_prompt_cache tests.test_generation_seed_ui tests.test_reference_cache_ui tests.test_output_paths
       - name: Parse and self-test the desktop launcher
