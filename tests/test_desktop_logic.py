@@ -266,6 +266,23 @@ class ConfigTests(unittest.TestCase):
                 with self.assertLogs("omnisonic.config", level="WARNING"):
                     self.assertEqual(load_config(path), DEFAULT_CONFIG)
 
+    def test_utf8_settings_with_or_without_bom_preserve_user_values(self):
+        path = scratch_directory("config-encoding-") / "settings.json"
+        settings = {
+            "language": "pl",
+            "theme": "dark",
+            "ai_steps": 48,
+            "clone_instruct": "Żółty głos — próba",
+        }
+        for encoding in ("utf-8", "utf-8-sig"):
+            with self.subTest(encoding=encoding):
+                path.write_text(json.dumps(settings, ensure_ascii=False), encoding=encoding)
+                original = path.read_bytes()
+                loaded = load_config(path)
+                for key, value in settings.items():
+                    self.assertEqual(loaded[key], value)
+                self.assertEqual(path.read_bytes(), original)
+
     def test_shortcut_config_is_normalized_and_unknown_actions_are_removed(self):
         result = normalize_config(
             {
@@ -478,6 +495,18 @@ class LocaleTests(unittest.TestCase):
     def _load_project_locales():
         root = Path(__file__).resolve().parents[1]
         return root, load_locales((root / "langs",))
+
+    def test_utf8_locales_with_or_without_bom_remain_available(self):
+        directory = scratch_directory("locale-encoding-")
+        for encoding in ("utf-8", "utf-8-sig"):
+            with self.subTest(encoding=encoding):
+                for code, value in (("en", "English test title"), ("pl", "Polska próba żółci")):
+                    (directory / f"{code}.lng").write_text(
+                        json.dumps({"title": value}, ensure_ascii=False), encoding=encoding
+                    )
+                locales = load_locales((directory,))
+                self.assertEqual(locales["en"]["title"], "English test title")
+                self.assertEqual(locales["pl"]["title"], "Polska próba żółci")
 
     def test_project_locales_are_valid_and_complete(self):
         _root, locales = self._load_project_locales()

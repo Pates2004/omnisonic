@@ -50,6 +50,7 @@ _MESSAGES = {
 _SRT_TIMESTAMP = re.compile(r"([0-9]{2,6}):([0-9]{2}):([0-9]{2})[,.]([0-9]{3})")
 _VTT_TIMESTAMP = re.compile(r"(?:([0-9]{2,6}):)?([0-9]{2}):([0-9]{2})\.([0-9]{3})")
 _TIMING_LINE = re.compile(r"([^\s]+)[ \t]+-->[ \t]+([^\s]+)(?:[ \t]+(.*))?")
+_TIMESTAMP_MAP = re.compile(r"[ \t]*X-TIMESTAMP-MAP[ \t]*=")
 _TAG = re.compile(
     r"<(?P<close>/)?(?P<name>b|i|u|s|font|em|strong|c|v|lang|ruby|rt|br)"
     r"(?P<extra>(?:[. \t][^<>]*?)?)(?P<selfclose>/)?>",
@@ -191,28 +192,33 @@ def read_subtitles(
     if webvtt:
         if not blocks:
             raise SubtitleError("subtitle_invalid_header")
-        header = blocks.pop(0).splitlines()
+        header = blocks.pop(0).split("\n")
         if not re.fullmatch(r"WEBVTT(?:[ \t].*)?", header[0]) or any(
             "-->" in line for line in header
         ):
             raise SubtitleError("subtitle_invalid_header")
-        if any(re.match(r"[ \t]*X-TIMESTAMP-MAP(?:[=: \t]|$)", line) for line in header):
+        if any(_TIMESTAMP_MAP.match(line) for line in header):
             raise SubtitleError("subtitle_timestamp_map")
     cues = []
     for block in blocks:
         check_cancelled()
-        lines = block.splitlines()
+        # CR/CRLF were normalized above. Other Unicode line separators are
+        # allowed within a WebVTT identifier and are not physical cue lines.
+        lines = block.split("\n")
         first = lines[0]
         index = len(cues) + 1
         if webvtt and (
             re.match(r"NOTE(?:[ \t]|$)", first)
-            or (first in {"STYLE", "REGION"} and (len(lines) < 2 or "-->" not in lines[1]))
+            or (
+                first.rstrip(" \t") in {"STYLE", "REGION"}
+                and (len(lines) < 2 or "-->" not in lines[1])
+            )
         ):
             if any("-->" in line for line in lines):
                 # Missing separators must not hide a cue inside display metadata.
                 raise SubtitleError("subtitle_invalid_cue", index=index)
             continue
-        if webvtt and first.startswith("X-TIMESTAMP-MAP"):
+        if webvtt and _TIMESTAMP_MAP.match(first):
             raise SubtitleError("subtitle_timestamp_map")
         if index > MAX_SUBTITLE_CUES:
             raise SubtitleError("subtitle_too_many", max_cues=MAX_SUBTITLE_CUES)
@@ -223,9 +229,22 @@ def read_subtitles(
         if match is None or (not webvtt and match.group(3)):
             raise SubtitleError("subtitle_invalid_cue", index=index)
         payload = lines[timing_index + 1 :]
-        if any("-->" in line for line in payload):
-            # A missing blank line must not turn the next cue's timing into speech.
-            raise SubtitleError("subtitle_invalid_cue", index=index)
+        for position, line in enumerate(payload):
+            if "-->" not in line:
+                continue
+            embedded = _TIMING_LINE.fullmatch(line.strip())
+            if (
+                webvtt
+                or (position > 0 and re.fullmatch(r"[0-9]+", payload[position - 1].strip()))
+                or (
+                    embedded is not None
+                    and any(_SRT_TIMESTAMP.fullmatch(embedded.group(side)) for side in (1, 2))
+                )
+            ):
+                # SRT allows literal arrows, unlike WebVTT. Still reject
+                # timestamp-shaped lines or arrows after another cue counter:
+                # a missing separator must not turn subsequent cues into speech.
+                raise SubtitleError("subtitle_invalid_cue", index=index)
         cues.append(
             SubtitleCue(
                 index,

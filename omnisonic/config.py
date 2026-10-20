@@ -237,7 +237,7 @@ def load_config(path: Path | str = CONFIG_FILE) -> dict[str, Any]:
     if not path.exists():
         return deepcopy(DEFAULT_CONFIG)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(data, dict):
             raise ValueError("configuration root must be a JSON object")
         return normalize_config(data)

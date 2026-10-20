@@ -119,6 +119,19 @@ def _output_name(name: str, fallback: str) -> str:
     return name
 
 
+def _fit_output_component(name: str, ending: str) -> str:
+    """Keep the complete filename within Windows' 255 UTF-16-unit limit."""
+    remaining = 255 - len(ending)
+    length = 0
+    for character in name:
+        units = 2 if ord(character) > 0xFFFF else 1
+        if units > remaining:
+            break
+        remaining -= units
+        length += 1
+    return (name[:length].rstrip(". ") or "_") + ending
+
+
 def plan_batch_outputs(inputs: list[BatchInput], preserve_structure: bool) -> list[Path]:
     """Keep source stems, adding suffixes only for Windows-safe name collisions."""
     # Reserve directories before files, including names such as a folder 'voice.wav'.
@@ -127,11 +140,11 @@ def plan_batch_outputs(inputs: list[BatchInput], preserve_structure: bool) -> li
     parents: list[Path] = []
 
     def reserve(parent: Path, name: str, extension: str = "") -> Path:
-        candidate = parent / (name + extension)
+        candidate = parent / _fit_output_component(name, extension)
         number = 1
         while candidate.as_posix().casefold() in used:
             number += 1
-            candidate = parent / f"{name} ({number}){extension}"
+            candidate = parent / _fit_output_component(name, f" ({number}){extension}")
         used.add(candidate.as_posix().casefold())
         return candidate
 

@@ -42,7 +42,7 @@ def load_locales(search_directories: Iterable[Path]) -> dict[str, dict[str, str]
             if code in locales:
                 continue
             try:
-                data = json.loads(locale_file.read_text(encoding="utf-8"))
+                data = json.loads(locale_file.read_text(encoding="utf-8-sig"))
                 if not isinstance(data, dict) or not all(
                     isinstance(key, str) and isinstance(value, str) for key, value in data.items()
                 ):

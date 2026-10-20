@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import codecs
 import json
+import os
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -258,6 +259,66 @@ class BatchTests(unittest.TestCase):
                     [Path(long_stem + suffix + ".wav") for suffix in ("", " (2)", " (3)")],
                 )
                 self.assertEqual(plan_batch_outputs(inputs, preserve_structure), outputs)
+
+    def test_supplementary_unicode_collision_suffix_fits_windows_component_limit(self):
+        stem = "\U0001f600" * 124
+        inputs = [
+            BatchInput(Path(folder) / (stem + extension))
+            for folder, extension in (("one", ".txt"), ("two", ".md"), ("three", ".srt"))
+        ]
+        expected = [
+            Path(stem + ".wav"),
+            Path(stem[:-1] + " (2).wav"),
+            Path(stem[:-1] + " (3).wav"),
+        ]
+        for preserve_structure in (False, True):
+            with self.subTest(preserve_structure=preserve_structure):
+                outputs = plan_batch_outputs(inputs, preserve_structure)
+                self.assertEqual(outputs, expected)
+                self.assertTrue(
+                    all(len(path.name.encode("utf-16-le")) // 2 <= 255 for path in outputs)
+                )
+                self.assertEqual(len({path.as_posix().casefold() for path in outputs}), 3)
+
+    def test_supplementary_unicode_folder_collision_fits_windows_component_limit(self):
+        folder = "\U0001f600" * 127
+        roots = [self.directory / name / folder for name in ("one", "two", "three")]
+        inputs = [BatchInput(root / "part.txt", root) for root in roots]
+        outputs = plan_batch_outputs(inputs, True)
+        self.assertEqual(
+            outputs,
+            [
+                Path(folder) / "part.wav",
+                Path(folder[:-2] + " (2)") / "part.wav",
+                Path(folder[:-2] + " (3)") / "part.wav",
+            ],
+        )
+        self.assertTrue(
+            all(
+                len(part.encode("utf-16-le")) // 2 <= 255 for path in outputs for part in path.parts
+            )
+        )
+
+    def test_case_insensitive_unicode_collision_keeps_both_output_names_within_limit(self):
+        stem = "\U0001f600" * 124
+        outputs = plan_batch_outputs(
+            [BatchInput(Path(stem + "A.txt")), BatchInput(Path(stem + "a.md"))], False
+        )
+        self.assertEqual(outputs, [Path(stem + "A.wav"), Path(stem[:-1] + " (2).wav")])
+
+    @unittest.skipUnless(os.name == "nt", "Windows UTF-16 filename boundary")
+    def test_supplementary_unicode_same_stem_inputs_both_save_on_real_filesystem(self):
+        stem = "\U0001f600" * 124
+        inputs = [
+            BatchInput(self.text_file(folder + "/" + stem + ".txt", folder))
+            for folder in ("one", "two")
+        ]
+        results = process_text_batch(
+            inputs, self.directory / "unicode-out", OperationState(), str, self.save_audio
+        )
+        self.assertEqual([result.status for result in results], ["done", "done"], results)
+        self.assertEqual([Path(result.output).read_text() for result in results], ["one", "two"])
+        self.assertEqual([item.path.read_text() for item in inputs], ["one", "two"])
 
     def test_bad_file_does_not_stop_remaining_files(self):
         paths = [BatchInput(self.text_file("a.txt", "")), BatchInput(self.text_file("b.txt"))]

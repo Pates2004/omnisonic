@@ -98,6 +98,40 @@ NOTE trailing comment
         cue = self.read("1\n00:00:01,000 --> 00:00:03,000\n" + payload)[0]
         self.assertEqual(cue.text, "A & B 漢字 2 < 3 [laughter] <b>literal</b>")
 
+    def test_webvtt_style_and_region_headers_allow_trailing_space_and_tab(self):
+        for suffix in (" ", "\t", " \t"):
+            with self.subTest(suffix=suffix):
+                text = (
+                    f"WEBVTT\n\nSTYLE{suffix}\n::cue {{ color: lime }}\n\n"
+                    f"REGION{suffix}\nid:main\nwidth:40%\n\n"
+                    "00:01.000 --> 00:02.000\nSpoken words"
+                )
+                self.assertEqual(
+                    self.read(text, "vtt"), (SubtitleCue(1, 1000, 2000, "Spoken words"),)
+                )
+
+    def test_webvtt_metadata_keywords_can_also_be_cue_identifiers(self):
+        for identifier in ("STYLE ", "REGION\t", "X-TIMESTAMP-MAP", "X-TIMESTAMP-MAP-scene"):
+            with self.subTest(identifier=identifier):
+                self.assertEqual(
+                    self.read(
+                        f"WEBVTT\n\n{identifier}\n00:01.000 --> 00:02.000\nSpoken words",
+                        "vtt",
+                    ),
+                    (SubtitleCue(1, 1000, 2000, "Spoken words"),),
+                )
+
+    def test_webvtt_identifiers_allow_unicode_line_separator_characters(self):
+        for separator in ("\u0085", "\u2028", "\u2029"):
+            with self.subTest(separator=separator):
+                self.assertEqual(
+                    self.read(
+                        f"WEBVTT\n\nscene{separator}one\n00:01.000 --> 00:02.000\nSpoken words",
+                        "vtt",
+                    ),
+                    (SubtitleCue(1, 1000, 2000, "Spoken words"),),
+                )
+
     def test_only_recognized_ass_and_html_markup_is_removed(self):
         text = r"{ordinary text} {\notastyle text} <custom>hello</custom> [cough]"
         cue = self.read("1\n00:00:01,000 --> 00:00:02,000\n" + text)[0]
@@ -133,6 +167,32 @@ NOTE trailing comment
             with self.subTest(text=text):
                 self.assert_error("invalid_cue", text)
 
+    def test_literal_arrows_in_srt_text_are_not_mistaken_for_timing_lines(self):
+        for text in ("A --> B", "The diagram shows A --> B.", "A --> B --> C"):
+            with self.subTest(text=text):
+                self.assertEqual(
+                    self.read("1\n00:00:01,000 --> 00:00:02,000\n" + text),
+                    (SubtitleCue(1, 1000, 2000, text),),
+                )
+                self.assert_error(
+                    "invalid_cue", "WEBVTT\n\n00:01.000 --> 00:02.000\n" + text, "vtt"
+                )
+
+    def test_srt_embedded_timings_still_reject_missing_cue_separators(self):
+        for timing in (
+            "00:00:02,000 --> 00:00:03,000",
+            "00:60:02,000 --> invalid",
+            "invalid --> 00:00:03,000",
+            "invalid --> invalid",
+        ):
+            counters = ("2\n",) if timing == "invalid --> invalid" else ("2\n", "")
+            for counter in counters:
+                with self.subTest(timing=timing, counter=counter):
+                    self.assert_error(
+                        "invalid_cue",
+                        "1\n00:00:00,000 --> 00:00:01,000\nFirst\n" + counter + timing + "\nSecond",
+                    )
+
     def test_invalid_times_and_overlaps_identify_the_cue(self):
         for stamp in (
             "-1:00:00,000",
@@ -158,12 +218,17 @@ NOTE trailing comment
         for text in ("", "NOTWEBVTT\n\n", "WEBVTT\n00:01.000 --> 00:02.000\nText"):
             self.assert_error("invalid_header", text, "vtt")
         self.assert_error("encoding_error", "WEBVTT\n\n", "vtt", "utf-16")
-        self.assert_error(
-            "timestamp_map",
-            "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00.000,MPEGTS:900000\n\n"
-            "00:00.000 --> 00:01.000\nText",
-            "vtt",
-        )
+        for separator in ("\n", "\n\n"):
+            for mapping in (
+                "X-TIMESTAMP-MAP=LOCAL:00:00.000,MPEGTS:900000",
+                " \tX-TIMESTAMP-MAP \t=LOCAL:00:00.000,MPEGTS:900000",
+            ):
+                with self.subTest(separator=separator, mapping=mapping):
+                    self.assert_error(
+                        "timestamp_map",
+                        "WEBVTT" + separator + mapping + "\n\n00:00.000 --> 00:01.000\nText",
+                        "vtt",
+                    )
 
     def test_invalid_webvtt_cue_is_not_discarded_between_valid_ones(self):
         self.assert_error(
