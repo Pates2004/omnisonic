@@ -293,10 +293,19 @@ class BatchTabMixin:
         preserve_structure,
         seed=None,
     ):
+        from copy import copy
+
         import numpy as np
         import soundfile as sf
 
         from omnivoice import VoiceClonePrompt
+        from omnisonic.operations import OperationCancelled
+        from omnisonic.subtitles import (
+            MAX_CUE_DURATION_MS,
+            SubtitleError,
+            read_subtitles,
+            render_subtitles,
+        )
 
         state.check_cancelled()
         # Keep temporary GPU prompt tokens out of the GUI's retained worker args.
@@ -318,13 +327,27 @@ class BatchTabMixin:
             )
         state.check_cancelled()
 
-        def synthesize(text):
+        def synthesize(text, duration=None):
             state.check_cancelled()
             try:
+                generation_kwargs = kwargs
+                if duration is not None:
+                    generation_kwargs = dict(kwargs)
+                    generation_kwargs.pop("speed", None)
+                    generation_kwargs["duration"] = duration
+                    timed_config = copy(kwargs["generation_config"])
+                    timed_config.pad_duration = 0.0
+                    timed_config.postprocess_output = False
+                    timed_config.fade_duration = min(timed_config.fade_duration, duration / 2)
+                    # Long-form chunk joins insert gaps and would alter cue timing.
+                    timed_config.audio_chunk_threshold = max(
+                        timed_config.audio_chunk_threshold, MAX_CUE_DURATION_MS / 1000 + 1
+                    )
+                    generation_kwargs["generation_config"] = timed_config
                 # Each item has its own seed scope: retries and queue ordering
                 # must not change the fixed-seed result of another item.
                 with seeded_generation(seed, model.device):
-                    audio = np.asarray(model.generate(text=text, **kwargs)[0])
+                    audio = np.asarray(model.generate(text=text, **generation_kwargs)[0])
             except Exception as exc:
                 message = operation_error_message(exc, self._)
                 if message == str(exc):
@@ -336,6 +359,52 @@ class BatchTabMixin:
 
         def save(path, audio):
             sf.write(str(path), audio, model.sampling_rate, subtype="PCM_16", format="WAV")
+
+        def render_subtitle(source, destination):
+            try:
+                cues = read_subtitles(source, check_cancelled=state.check_cancelled)
+                current_cue = 0
+
+                def cue_progress(index, total, cue):
+                    nonlocal current_cue
+                    current_cue = cue.index
+                    message = self._("subtitle_progress").format(
+                        current=cue.index, total=total, file=source.name
+                    )
+                    state.set_progress(index, total, message)
+                    if index == cue.index - 1:
+                        wx.CallAfter(self.Log, message)
+
+                def synthesize_cue(text, duration):
+                    try:
+                        return synthesize(text, duration)
+                    except OperationCancelled:
+                        raise
+                    except Exception as exc:
+                        raise ValueError(
+                            self._("subtitle_generation_failed").format(
+                                index=current_cue, error=operation_error_message(exc, self._)
+                            )
+                        ) from exc
+
+                with sf.SoundFile(
+                    str(destination),
+                    mode="w",
+                    samplerate=model.sampling_rate,
+                    channels=1,
+                    subtype="PCM_16",
+                    format="WAV",
+                ) as stream:
+                    render_subtitles(
+                        cues,
+                        model.sampling_rate,
+                        synthesize_cue,
+                        stream.write,
+                        check_cancelled=state.check_cancelled,
+                        on_progress=cue_progress,
+                    )
+            except SubtitleError as exc:
+                raise ValueError(operation_error_message(exc, self._)) from exc
 
         def progress(index, result):
             if result.status == "failed":
@@ -360,6 +429,7 @@ class BatchTabMixin:
             save,
             progress,
             preserve_structure=preserve_structure,
+            render_subtitle=render_subtitle,
         )
 
     def _BatchProgress(self, index, result):

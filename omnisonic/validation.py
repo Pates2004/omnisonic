@@ -34,6 +34,10 @@ def validation_error_message(error: Exception, translate_func) -> str:
 
 def operation_error_message(error: Exception, translate_func) -> str:
     """Translate known engine errors without importing the inference runtime."""
+    from .subtitles import SubtitleError
+
+    if isinstance(error, SubtitleError):
+        return translate_func(error.message_key).format(**error.values)
     key = getattr(error, "message_key", None)
     if key in {
         "normalization_missing_dependency",

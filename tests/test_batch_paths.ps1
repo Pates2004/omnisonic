@@ -1,9 +1,11 @@
+. (Join-Path $PSScriptRoot '..\project_materials.ps1')
+
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $PSScriptRoot
-$isDesktop = Test-Path -LiteralPath (Join-Path $project 'desktop_launcher.ps1')
+$isDesktop = Test-Path -LiteralPath (Join-ProjectMaterialPath $project 'desktop_launcher.ps1')
 $batchName = if ($isDesktop) { 'start_desktop.bat' } else { 'start.bat' }
 $launcherName = if ($isDesktop) { 'desktop_launcher.ps1' } else { 'launcher.ps1' }
-$scratch = Join-Path $project ('trash\batch-path-tests-' + [Guid]::NewGuid().ToString('N'))
+$scratch = Join-ProjectMaterialPath $project ('trash\batch-path-tests-' + [Guid]::NewGuid().ToString('N'))
 $originalDirectory = (Get-Location).Path
 $originalLiteralVariable = $env:OMNISONIC_LITERAL_PATH_TEST
 $stub = @'
@@ -29,7 +31,7 @@ try {
     foreach ($name in $names) {
         $fixture = Join-Path $scratch $name
         [IO.Directory]::CreateDirectory($fixture) | Out-Null
-        Copy-Item -LiteralPath (Join-Path $project $batchName) -Destination (Join-Path $fixture $batchName)
+        Copy-Item -LiteralPath (Join-ProjectMaterialPath $project $batchName) -Destination (Join-Path $fixture $batchName)
         [IO.File]::WriteAllText((Join-Path $fixture $launcherName), $stub)
         # Percent expansion by an external cmd caller is outside the BAT's
         # control. Relative invocation isolates expansion inside the launcher.

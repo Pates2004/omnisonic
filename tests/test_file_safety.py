@@ -21,6 +21,8 @@ from omnisonic.validation import (
     validate_filename_component,
     validation_error_message,
 )
+from tests.materials import scratch_directory
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,8 +39,7 @@ def app_methods(names, namespace):
 
 class FileSafetyTests(unittest.TestCase):
     def setUp(self):
-        (ROOT / "trash").mkdir(exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix="file-safety-", dir=ROOT / "trash"))
+        self.scratch = scratch_directory("file-safety-")
 
     def test_failed_write_preserves_existing_file_and_cleans_partial_output(self):
         destination = self.scratch / "voice.wav"

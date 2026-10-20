@@ -3,7 +3,6 @@
 import gc
 import importlib.util
 import os
-import tempfile
 import unittest
 import weakref
 from dataclasses import dataclass
@@ -13,6 +12,7 @@ from unittest.mock import Mock, patch
 
 from omnisonic.operations import OperationCancelled, OperationState
 from omnisonic.prompt_cache import ReferencePromptCache, _file_version
+from tests.materials import scratch_directory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,8 +61,7 @@ class Model:
 
 class PromptCacheTests(unittest.TestCase):
     def setUp(self):
-        (ROOT / "trash").mkdir(exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix="prompt-cache-", dir=ROOT / "trash"))
+        self.scratch = scratch_directory("prompt-cache-")
         self.source = self.scratch / "synthetic-reference.bin"
         self.source.write_bytes(b"synthetic audio")
         self.cache = ReferencePromptCache()

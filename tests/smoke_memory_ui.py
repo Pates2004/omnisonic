@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import gc
 import os
-import tempfile
 import time
 import weakref
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from tests.materials import scratch_directory
 
 
 def main():
-    root = Path(__file__).resolve().parents[1]
-    scratch = Path(tempfile.mkdtemp(prefix="memory-ui-", dir=root / "trash"))
+    scratch = scratch_directory("memory-ui-")
     os.environ["OMNISONIC_APP_DIR"] = str(scratch / "program")
 
     import numpy as np

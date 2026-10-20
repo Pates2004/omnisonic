@@ -3,13 +3,13 @@
 import ast
 import logging
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from omnisonic.validation import safe_child_path
+from tests.materials import scratch_directory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,9 +56,7 @@ class PresetControl:
 
 class PresetRefreshTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="omnisonic-preset-selection-")
-        self.addCleanup(temporary.cleanup)
-        temporary_path = Path(temporary.name)
+        temporary_path = scratch_directory("omnisonic-preset-selection-")
         # Exercise canonicalization even when Windows does not use a short-name alias.
         self.directory = temporary_path / ".." / temporary_path.name
         for name in ("Alpha.pt", "Bravo.pt"):

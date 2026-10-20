@@ -4,12 +4,18 @@ param(
     [string]$PortableEnvironment = ''
 )
 
+. (Join-Path $PSScriptRoot '..\project_materials.ps1')
+
 $ErrorActionPreference = 'Stop'
 $testProject = Split-Path -Parent $PSScriptRoot
 . (Join-Path $testProject 'desktop_launcher.ps1')
+function Assert-ProjectChildPath {
+    param([string]$Path)
+    return Assert-ProjectTestPath $Path $testProject
+}
 if (-not $SystemEnvironment) { $SystemEnvironment = Join-Path $testProject 'venv' }
 if (-not $PortableEnvironment) {
-    $PortableEnvironment = Join-Path $testProject 'Workspace\amd-portable-validation\env'
+    $PortableEnvironment = Join-ProjectMaterialPath $testProject 'Workspace\amd-portable-validation\env'
 }
 
 # These helpers only sleep. No imports of the application, user files or microphone.

@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import codecs
 import json
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +19,7 @@ from omnisonic.batch import (
 )
 from omnisonic.i18n import load_locales
 from omnisonic.operations import OperationCancelled, OperationState
+from tests.materials import scratch_directory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -110,8 +110,7 @@ class BatchSettingsTests(unittest.TestCase):
 
 class BatchTests(unittest.TestCase):
     def setUp(self):
-        (ROOT / "trash").mkdir(exist_ok=True)
-        self.directory = Path(tempfile.mkdtemp(prefix="batch-unit-", dir=ROOT / "trash"))
+        self.directory = scratch_directory("batch-unit-")
 
     def text_file(self, name, text="Example text"):
         path = self.directory / name

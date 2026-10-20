@@ -1860,6 +1860,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         helpMenu = wx.Menu()
         item_tags = helpMenu.Append(wx.ID_ANY, self._("menu_help_tags"))
         self.Bind(wx.EVT_MENU, self.OnShowTags, item_tags)
+        item_subtitles = helpMenu.Append(wx.ID_ANY, self._("subtitle_help_title"))
+        self.Bind(wx.EVT_MENU, self.OnShowSubtitleHelp, item_subtitles)
         menubar.Append(helpMenu, self._("menu_help"))
 
         self.SetMenuBar(menubar)
@@ -3924,6 +3926,14 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
     def OnShowTags(self, event):
         wx.MessageBox(self._("msg_tags"), self._("title_tags"), wx.OK | wx.ICON_INFORMATION)
+
+    def OnShowSubtitleHelp(self, event):
+        wx.MessageBox(
+            self._("subtitle_help_body"),
+            self._("subtitle_help_title"),
+            wx.OK | wx.ICON_INFORMATION,
+            parent=self,
+        )
 
 
 def main():

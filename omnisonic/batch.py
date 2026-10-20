@@ -13,10 +13,12 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from .operations import OperationCancelled, OperationState
+from .files import atomic_write
 from .validation import is_path_link
 
 
 TEXT_EXTENSIONS = {".txt", ".md"}
+SUBTITLE_EXTENSIONS = {".srt", ".vtt"}
 MAX_TEXT_BYTES = 5 * 1024 * 1024
 MAX_BATCH_FILES = 5000
 logger = logging.getLogger(__name__)
@@ -65,7 +67,7 @@ def discover_text_files(
                     if child.is_dir() and not recursive:
                         continue
                     visit(child, False, root if root is not None else path)
-            elif path.is_file() and path.suffix.lower() in TEXT_EXTENSIONS:
+            elif path.is_file() and path.suffix.lower() in TEXT_EXTENSIONS | SUBTITLE_EXTENSIONS:
                 if key not in seen:
                     if len(seen) >= MAX_BATCH_FILES:
                         raise BatchInputError("batch_limit")
@@ -164,8 +166,9 @@ def process_text_batch(
     on_result: Callable[[int, BatchResult], None] = lambda _index, _result: None,
     *,
     preserve_structure: bool = False,
+    render_subtitle: Callable[[Path, Path], None] | None = None,
 ) -> list[BatchResult]:
-    """One file per model call; never overwrite an existing batch directory."""
+    """Publish one complete WAV per input; keep subtitle timelines in one file."""
     state.check_cancelled()
     relative_outputs = plan_batch_outputs(inputs, preserve_structure)
     output_directory.mkdir(parents=True, exist_ok=False)
@@ -173,6 +176,7 @@ def process_text_batch(
         BatchResult(str(item.path), source_root=str(item.root) if item.root is not None else None)
         for item in inputs
     ]
+    error_in_flight = False
     try:
         for index, item in enumerate(inputs):
             state.check_cancelled()
@@ -183,8 +187,13 @@ def process_text_batch(
             temporary = None
             try:
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                text = read_text_input(item.path)
-                audio = synthesize(text)
+                is_subtitle = item.path.suffix.lower() in SUBTITLE_EXTENSIONS
+                if is_subtitle:
+                    if render_subtitle is None:
+                        raise BatchInputError("batch_subtitle_renderer_required")
+                else:
+                    text = read_text_input(item.path)
+                    audio = synthesize(text)
                 state.check_cancelled()
                 # A source named 'voice.part.txt' must not collide with temporary audio.
                 descriptor, name = tempfile.mkstemp(
@@ -192,7 +201,10 @@ def process_text_batch(
                 )
                 os.close(descriptor)
                 temporary = Path(name)
-                save_audio(temporary, audio)
+                if is_subtitle:
+                    render_subtitle(item.path, temporary)
+                else:
+                    save_audio(temporary, audio)
                 state.check_cancelled()
                 temporary.replace(destination)
                 result.status = "done"
@@ -213,13 +225,25 @@ def process_text_batch(
                             "Could not remove partial batch audio %s: %s", temporary, exc
                         )
                 on_result(index, BatchResult(**asdict(result)))
+    except BaseException:
+        error_in_flight = True
+        raise
     finally:
         report = {
             "cancelled": state.cancel_flag,
             "preserve_structure": preserve_structure,
             "files": [asdict(item) for item in results],
         }
-        (output_directory / "batch_report.json").write_text(
-            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        report_path = output_directory / "batch_report.json"
+        try:
+            atomic_write(
+                report_path,
+                lambda path: path.write_text(
+                    json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+                ),
+            )
+        except Exception as exc:
+            if not error_in_flight:
+                raise
+            logger.warning("Could not save batch report %s: %s", report_path, exc)
     return results

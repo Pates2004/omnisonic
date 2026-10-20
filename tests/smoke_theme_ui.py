@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import os
-import tempfile
 import threading
-from pathlib import Path
 from unittest.mock import patch
+from tests.materials import scratch_directory
 
 
 def main():
-    root = Path(__file__).resolve().parents[1]
-    scratch = Path(tempfile.mkdtemp(prefix="theme-ui-", dir=root / "trash"))
+    scratch = scratch_directory("theme-ui-")
     os.environ["OMNISONIC_APP_DIR"] = str(scratch / "program")
 
     import wx

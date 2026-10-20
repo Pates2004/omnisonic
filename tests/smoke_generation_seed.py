@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import os
-import tempfile
 import time
 from copy import deepcopy
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from tests.materials import scratch_directory
 
 
 def main():
-    root = Path(__file__).resolve().parents[1]
-    (root / "trash").mkdir(exist_ok=True)
-    scratch = Path(tempfile.mkdtemp(prefix="generation-seed-ui-", dir=root / "trash"))
+    scratch = scratch_directory("generation-seed-ui-")
     os.environ["OMNISONIC_APP_DIR"] = str(scratch / "program")
 
     import numpy as np

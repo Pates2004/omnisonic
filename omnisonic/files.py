@@ -1,10 +1,13 @@
 """Failure-safe file replacement and collision-free numbered output names."""
 
+import logging
 import os
 import tempfile
 from pathlib import Path
 
 from .validation import validate_filename_component
+
+logger = logging.getLogger(__name__)
 
 
 def atomic_write(path, writer, check_cancelled=lambda: None):
@@ -20,7 +23,10 @@ def atomic_write(path, writer, check_cancelled=lambda: None):
         check_cancelled()
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning("Could not remove partial file %s: %s", temporary, exc)
 
 
 def write_numbered_audio(folder, prefix, writer):
@@ -40,6 +46,9 @@ def write_numbered_audio(folder, prefix, writer):
         try:
             atomic_write(path, writer)
         except BaseException:
-            path.unlink(missing_ok=True)
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Could not remove failed audio reservation %s: %s", path, exc)
             raise
         return path

@@ -5,20 +5,17 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from omnisonic.startup import announce_window, run
 from omnisonic.operations import OperationState, execute_worker
+from tests.materials import scratch_directory
 
 
 class StartupTests(unittest.TestCase):
     def setUp(self):
-        root = Path(__file__).resolve().parents[1]
-        (root / "trash").mkdir(exist_ok=True)
-        self.folder = Path(tempfile.mkdtemp(prefix="startup-test-", dir=root / "trash"))
+        self.folder = scratch_directory("startup-test-")
 
     def test_readiness_is_published_atomically_with_own_pid(self):
         marker = self.folder / "ready.txt"

@@ -1,5 +1,14 @@
+. (Join-Path $PSScriptRoot '..\project_materials.ps1')
+
 $ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'desktop_launcher.ps1')
+
+# Restrict real fixture operations to this checkout and its central test areas.
+$materialTestProject = Split-Path -Parent $PSScriptRoot
+function Assert-ProjectChildPath {
+    param([string]$Path)
+    return Assert-ProjectTestPath $Path $materialTestProject
+}
 
 function Assert-UsageTest {
     param([bool]$Condition, [string]$Message)
@@ -20,12 +29,12 @@ function Assert-Busy {
     }
     throw 'Expected an in-use runtime to be rejected.'
 }
-$runtimeRoot = Join-Path $ProjectRoot 'trash\virtual-usage-runtime'
+$runtimeRoot = Join-ProjectMaterialPath $ProjectRoot 'trash\virtual-usage-runtime'
 & {
     function Get-CimInstance { return $processes }
     $roots = @($runtimeRoot, "$runtimeRoot.old", "$runtimeRoot.new", "$runtimeRoot.failed")
     foreach ($root in $roots) {
-        $executable = Join-Path $root 'pythonw.exe'
+        $executable = Join-ProjectMaterialPath $root 'pythonw.exe'
         $processes = @([pscustomobject]@{
             ProcessId = 12345; ExecutablePath = $executable
             CommandLine = ('"' + $executable + '" -E -s -m omnisonic.startup')

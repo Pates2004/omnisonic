@@ -1,14 +1,12 @@
 """Exercise recording recovery and keyboard state with a synthetic input stream."""
 
 import os
-import tempfile
-from pathlib import Path
 from unittest.mock import Mock, patch
+from tests.materials import scratch_directory
 
 
 def main():
-    root = Path(__file__).resolve().parents[1]
-    scratch = Path(tempfile.mkdtemp(prefix="recording-ui-", dir=root / "trash"))
+    scratch = scratch_directory("recording-ui-")
     os.environ["OMNISONIC_APP_DIR"] = str(scratch / "program")
 
     import numpy as np

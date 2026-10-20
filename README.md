@@ -254,9 +254,10 @@ After installation, the `omnisonic` command is also available.
 ### Batch text-to-speech
 
 On **Batch processing**, use **Add files** or **Add folders** to select one or
-many TXT/Markdown inputs. Folder selection supports multiple folders at once;
+many TXT/Markdown inputs or SRT/VTT subtitle files. Folder selection supports multiple folders at once;
 subfolder scanning is optional. Duplicate paths are skipped. UTF-8 (with or
 without BOM) and UTF-16 with BOM are supported; Markdown is read as plain text.
+VTT subtitle files require UTF-8.
 Binary documents such as PDF/DOCX and audio inputs are not treated as text.
 
 Choose Clone, Design, or Automatic mode. The batch uses the voice/preset,
@@ -306,6 +307,44 @@ current model call and keeps completed recordings. Retrying skips completed
 queue entries; Delete/**Remove selected** only remove entries from the queue,
 not source files or saved audio. The queue is session-only. Limits are 5000
 files per queue and 5 MiB of text per file.
+
+### Ścieżka lektorska z napisów / Narration from subtitles
+
+Dodaj SRT lub VTT do **Przetwarzania masowego**, wybierz tryb głosu i uruchom
+przetwarzanie przyciskiem albo **Ctrl+G**. Z każdego pliku napisów powstaje jeden
+WAV mono, np. `film.srt` → `film.wav`, z ciszą od początku osi czasu i pomiędzy
+wypowiedziami. Umieść ten WAV na początku filmu w edytorze audio lub wideo.
+Wybrany folder wyjściowy i zachowanie struktury działają tak samo jak dla TXT.
+
+Czas każdej pozycji napisów zastępuje ustawienia szybkości i długości pojedynczego
+tekstu. Program przekazuje silnikowi docelową długość wypowiedzi, zachowując
+ustawienia głosu, języka i ziarna losowania. Dla spójnego lektora użyj klonowania
+z jedną referencją lub presetem. Bardzo krótkie przedziały mogą pogarszać wymowę;
+wynik wymaga odsłuchu. Formatowanie i etykiety osób nie są czytane.
+
+Błędne lub nakładające się pozycje oraz nagrania przekraczające swój przedział są
+zgłaszane z numerem kolejnej pozycji w pliku. Program nie przycina wygenerowanej
+mowy ani nie przesuwa kolejnych wypowiedzi. Popraw napisy i ponów przetwarzanie.
+Anulowanie zachowuje wcześniejsze ukończone pliki; niedokończony plik napisów
+jest generowany ponownie od pierwszej pozycji. Dalsze informacje otwiera polecenie
+**Pomoc → Ścieżka lektorska z napisów**.
+
+Add [SRT](https://www.loc.gov/preservation/digital/formats/fdd/fdd000569.shtml) or
+[WebVTT](https://www.w3.org/TR/webvtt1/) through the existing batch controls.
+Each subtitle file produces one mono WAV on its original timeline, with initial
+silence and gaps between cues. Place it at time zero in the video editor. Cue
+times override single-text speed/duration; other voice settings and optional
+fixed seeds still apply. Use one cloned voice for consistent narration. The
+engine attempts to fit each interval, but very short intervals can reduce speech
+quality. The application never trims overflowing waveforms or shifts later cues.
+Invalid/overlapping cues are reported rather than skipped. Cancellation preserves
+finished files and discards an unfinished track. **Help → Narration from subtitles**
+opens the usage details.
+
+Limits / limity: 5 MiB per file, 20000 cues, 120 seconds per cue, 12-hour timeline
+and the WAV container size limit. SRT accepts UTF-8 or UTF-16 with BOM; VTT requires
+UTF-8. HLS timestamp maps and ASS/SSA files are not supported. Standard caption
+formatting, WebVTT voice tags and recognized inline SRT styling are removed.
 
 ### Power Switch: transfer to another PC or change the GPU
 
@@ -479,10 +518,15 @@ local OmniVoice checkpoint.
 Add `-Portable` to download the official portable Python and build the small ROCm
 source package that previously failed. This network regression also tests Python
 after environment activation/renaming and starts both system-venv and portable
-`pythonw.exe` in a controlled test. It leaves disposable diagnostics in `trash/`.
+`pythonw.exe` in a controlled test. Disposable test artifacts go to
+`D:\work\Trash\<checkout-directory-name>` and useful diagnostics to
+`D:\work\Workspace\<checkout-directory-name>`. C: is used only if D: does not
+exist; access failures do not select another drive. On non-Windows test hosts,
+the equivalent test area is under the system temporary directory.
 For a full standalone ROCm installation on a supported AMD device, run
 `powershell -ExecutionPolicy Bypass -File tests/smoke_portable_amd.ps1`. It creates
-an isolated Python and GPU runtime in `Workspace/amd-portable-validation/`,
+an isolated Python and GPU runtime under the central project's
+`Workspace/amd-portable-validation/`,
 without replacing the application's `venv/`, `config/`, or presets.
 
 `tests/test_operation_dispatch.py` covers queued GUI completions, cancellation
@@ -505,11 +549,29 @@ machine execution policy or replace the environments.
 `python -B -m tests.smoke_normalization_ui` verifies real wx controls, Polish and
 English messages, explicit-language checks, conversion and batch WAV writing
 using synthetic synthesis. It requires the runtime dependencies but no model.
+`python -B -m tests.smoke_subtitles_ui` checks the actual subtitle queue, Help,
+Ctrl+G, all three voice modes, both locales and the saved WAV timeline using a
+synthetic model. Fast subtitle regressions run with
+`python -B -m unittest tests.test_subtitles tests.test_batch_subtitles`.
+To exercise the actual subtitle worker with an offline cached model, generated
+reference speech, fixed seed and waveform timing checks on real hardware:
+
+```powershell
+. .\project_materials.ps1
+$testOutput = Join-ProjectMaterialPath (Get-Location).Path 'Workspace\subtitle-inference'
+python -B -m tests.smoke_subtitle_inference --backend rocm --output $testOutput
+```
+
+Select CUDA, ROCm, XPU or CPU as appropriate and choose a new output directory.
+The test never downloads missing models and keeps its synthetic speech and report
+as diagnostic evidence.
 For cached-model synthesis plus normalization, zero-CFG raw decoding, disabled
 chunking and two-reference pairing on a real device, use:
 
 ```powershell
-python -B -m tests.smoke_inference --backend rocm --output Workspace/input-smoke --regression-inputs
+. .\project_materials.ps1
+$testOutput = Join-ProjectMaterialPath (Get-Location).Path 'Workspace\input-smoke'
+python -B -m tests.smoke_inference --backend rocm --output $testOutput --regression-inputs
 ```
 
 Choose a new output directory for each test.
@@ -517,7 +579,9 @@ Choose a new output directory for each test.
 Optional real-device web regression (use a reference longer than 30 seconds):
 
 ```powershell
-venv\Scripts\python -B tests/smoke_web_inference.py --backend rocm --reference long-test.wav --output trash/web-smoke
+. .\project_materials.ps1
+$testOutput = Join-ProjectMaterialPath (Get-Location).Path 'Workspace\web-smoke'
+venv\Scripts\python -B tests/smoke_web_inference.py --backend rocm --reference long-test.wav --output $testOutput
 ```
 
 This uses locally cached models, checks the web UI's registered clone/design

@@ -5,7 +5,6 @@ import inspect
 import logging
 import os
 import stat
-import tempfile
 import unittest
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import SimpleNamespace
@@ -23,13 +22,10 @@ from omnisonic.validation import (
 )
 from tests.test_file_safety import app_methods
 from tests.test_preset_selection import PresetControl, load_handler
+from tests.materials import scratch_directory
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def setUpModule():
-    (ROOT / "trash").mkdir(exist_ok=True)
 
 
 def reparse_info(mode, tag):
@@ -52,7 +48,7 @@ class ReparseFileTests(unittest.TestCase):
                     self.assertEqual(is_path_link(Path("synthetic.txt")), expected)
 
     def test_cloud_files_and_folders_are_discovered_without_hydrating_real_user_files(self):
-        directory = Path(tempfile.mkdtemp(prefix="cloud-discovery-", dir=ROOT / "trash"))
+        directory = scratch_directory("cloud-discovery-")
         nested = directory / "cloud-folder"
         nested.mkdir()
         source = nested / "readable.txt"
@@ -76,7 +72,7 @@ class ReparseFileTests(unittest.TestCase):
 
 class PresetFileSafetyTests(unittest.TestCase):
     def setUp(self):
-        self.directory = Path(tempfile.mkdtemp(prefix="preset-file-safety-", dir=ROOT / "trash"))
+        self.directory = scratch_directory("preset-file-safety-")
         self.wx = MagicMock(NOT_FOUND=-1, ID_YES=1, YES_NO=2, ICON_WARNING=4, OK=8, ICON_ERROR=16)
         self.namespace = {
             "wx": self.wx,
@@ -323,7 +319,7 @@ class PresetFileSafetyTests(unittest.TestCase):
 
 class PresetRenameTests(unittest.TestCase):
     def setUp(self):
-        self.directory = Path(tempfile.mkdtemp(prefix="preset-file-safety-", dir=ROOT / "trash"))
+        self.directory = scratch_directory("preset-file-safety-")
         self.wx = MagicMock(ID_OK=1, YES=2, YES_NO=4, ICON_WARNING=8)
         self.wx.MessageBox.return_value = self.wx.YES
         self.dialog = Mock()

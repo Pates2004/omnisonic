@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '..\project_materials.ps1')
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'power_switch.ps1')
 
 function Assert-Test {
@@ -31,7 +32,7 @@ Assert-Test ($SwitchData -eq (Join-Path $SwitchRoot 'config')) 'Power Switch use
         Assert-SwitchAppClosed
     }
 }
-$fixture = Join-Path $SwitchRoot ('trash\power-switch-tests-' + [Guid]::NewGuid().ToString('N'))
+$fixture = Join-ProjectMaterialPath $SwitchRoot ('trash\power-switch-tests-' + [Guid]::NewGuid().ToString('N'))
 $SwitchRoot = Join-Path $fixture 'old-pc'
 $SwitchData = Join-Path $SwitchRoot 'config'
 $SwitchDocuments = Join-Path $fixture 'old-documents'

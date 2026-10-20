@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from tests.materials import scratch_directory
 
 
 def main():
-    root = Path(__file__).resolve().parents[1]
-    scratch = Path(tempfile.mkdtemp(prefix="batch-ui-", dir=root / "trash"))
+    scratch = scratch_directory("batch-ui-")
     os.environ["OMNISONIC_APP_DIR"] = str(scratch / "program")
 
     import numpy as np

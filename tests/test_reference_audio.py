@@ -2,13 +2,13 @@
 
 import ast
 import json
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import omnisonic.config as config
+from tests.materials import scratch_directory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,8 +49,7 @@ class ReferenceTests(unittest.TestCase):
         pipe.assert_called_once_with("long.wav", return_timestamps=True)
 
     def test_config_migration_copies_profile_once_without_overwriting(self):
-        (ROOT / "trash").mkdir(exist_ok=True)
-        scratch = Path(tempfile.mkdtemp(prefix="config-migration-", dir=ROOT / "trash"))
+        scratch = scratch_directory("config-migration-")
         program = scratch / "program"
         profile = scratch / "profile"
         profile.mkdir()
@@ -76,8 +75,7 @@ class ReferenceTests(unittest.TestCase):
             self.assertEqual(config.load_config(config.CONFIG_FILE)["font_size"], 14)
 
     def test_corrupt_profile_can_use_old_portable_settings(self):
-        (ROOT / "trash").mkdir(exist_ok=True)
-        scratch = Path(tempfile.mkdtemp(prefix="config-migration-", dir=ROOT / "trash"))
+        scratch = scratch_directory("config-migration-")
         profile = scratch / "profile"
         profile.mkdir()
         (profile / "settings.json").write_text("broken", encoding="utf-8")

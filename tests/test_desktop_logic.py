@@ -4,11 +4,12 @@ import ast
 import json
 import os
 import string
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+from tests.materials import scratch_directory
 
 from omnisonic.accelerator import detect_accelerator, format_diagnostics, validate_accelerator
 from omnisonic.config import (
@@ -183,12 +184,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(result["design_instruct"], "")
 
     def test_config_round_trip_is_valid_json(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "settings.json"
-            save_config({"language": "pl", "ai_cfg": 3.5}, path)
-            persisted = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(persisted["language"], "pl")
-            self.assertEqual(load_config(path)["ai_cfg"], 3.5)
+        temp_dir = scratch_directory("desktop-logic-")
+        path = Path(temp_dir) / "settings.json"
+        save_config({"language": "pl", "ai_cfg": 3.5}, path)
+        persisted = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["language"], "pl")
+        self.assertEqual(load_config(path)["ai_cfg"], 3.5)
 
     def test_malformed_enum_values_use_defaults_without_losing_valid_settings(self):
         for key in ("theme", "preset_display_mode"):
@@ -224,25 +225,25 @@ class ConfigTests(unittest.TestCase):
                     self.assertEqual(normalize_config({key: value})[key], DEFAULT_CONFIG[key])
 
     def test_valid_json_with_malformed_values_loads_and_preserves_other_settings(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "settings.json"
-            path.write_text(
-                json.dumps(
-                    {
-                        "theme": [],
-                        "preset_display_mode": {},
-                        "clone_lang": None,
-                        "design_lang": ["Polish"],
-                        "auto_lang": 123,
-                        "ai_steps": 10**1000,
-                        "ai_cfg": "NaN",
-                        "language": "pl",
-                        "hide_console": False,
-                    }
-                ),
-                encoding="utf-8",
-            )
-            result = load_config(path)
+        temp_dir = scratch_directory("desktop-logic-")
+        path = Path(temp_dir) / "settings.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "theme": [],
+                    "preset_display_mode": {},
+                    "clone_lang": None,
+                    "design_lang": ["Polish"],
+                    "auto_lang": 123,
+                    "ai_steps": 10**1000,
+                    "ai_cfg": "NaN",
+                    "language": "pl",
+                    "hide_console": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = load_config(path)
         for key in (
             "theme",
             "preset_display_mode",
@@ -257,13 +258,13 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(result["hide_console"])
 
     def test_broken_config_falls_back_to_defaults(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "settings.json"
-            for payload in ("not json", "[1, 2]", "null", "123"):
-                with self.subTest(payload=payload):
-                    path.write_text(payload, encoding="utf-8")
-                    with self.assertLogs("omnisonic.config", level="WARNING"):
-                        self.assertEqual(load_config(path), DEFAULT_CONFIG)
+        temp_dir = scratch_directory("desktop-logic-")
+        path = Path(temp_dir) / "settings.json"
+        for payload in ("not json", "[1, 2]", "null", "123"):
+            with self.subTest(payload=payload):
+                path.write_text(payload, encoding="utf-8")
+                with self.assertLogs("omnisonic.config", level="WARNING"):
+                    self.assertEqual(load_config(path), DEFAULT_CONFIG)
 
     def test_shortcut_config_is_normalized_and_unknown_actions_are_removed(self):
         result = normalize_config(
@@ -283,10 +284,10 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(result["shortcut_enabled"]["save_result"])
 
     def test_default_shortcut_config_is_not_shared_between_loads(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            missing_path = Path(temp_dir) / "missing.json"
-            first = load_config(missing_path)
-            second = load_config(missing_path)
+        temp_dir = scratch_directory("desktop-logic-")
+        missing_path = Path(temp_dir) / "missing.json"
+        first = load_config(missing_path)
+        second = load_config(missing_path)
         first["shortcut_bindings"]["generate"] = "Ctrl+Alt+G"
         self.assertEqual(second["shortcut_bindings"]["generate"], "Ctrl+G")
         self.assertEqual(DEFAULT_CONFIG["shortcut_bindings"]["generate"], "Ctrl+G")
@@ -315,11 +316,11 @@ class ValidationTests(unittest.TestCase):
                 validate_filename_component(value)
 
     def test_safe_child_path_cannot_escape(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            self.assertEqual(safe_child_path(root, "voice.pt"), root.resolve() / "voice.pt")
-            with self.assertRaises(ValueError):
-                safe_child_path(root, "../outside.pt")
+        temp_dir = scratch_directory("desktop-logic-")
+        root = Path(temp_dir)
+        self.assertEqual(safe_child_path(root, "voice.pt"), root.resolve() / "voice.pt")
+        with self.assertRaises(ValueError):
+            safe_child_path(root, "../outside.pt")
 
 
 class OperationTests(unittest.TestCase):

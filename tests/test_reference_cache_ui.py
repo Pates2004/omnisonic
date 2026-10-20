@@ -2,7 +2,6 @@
 
 import ast
 import sys
-import tempfile
 import unittest
 from contextlib import nullcontext
 from pathlib import Path
@@ -16,6 +15,7 @@ from omnisonic.model_lifecycle import ModelLifecycle
 from omnisonic.operations import OperationCancelled, OperationState
 from omnisonic.validation import safe_child_path
 from tests.test_prompt_cache import Model, Prompt, Tokens
+from tests.materials import scratch_directory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,8 +33,7 @@ def load_worker(relative, name, namespace):
 
 class ReferenceCacheWorkerTests(unittest.TestCase):
     def setUp(self):
-        (ROOT / "trash").mkdir(exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix="reference-cache-ui-", dir=ROOT / "trash"))
+        self.scratch = scratch_directory("reference-cache-ui-")
         self.source = self.scratch / "synthetic-reference.bin"
         self.source.write_bytes(b"only a mocked audio decoder reads this")
         self.presets = self.scratch / "presets"

@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param([switch]$Portable)
 
+. (Join-Path $PSScriptRoot '..\project_materials.ps1')
+
 $ErrorActionPreference = "Stop"
 $testProject = Split-Path -Parent $PSScriptRoot
 $launcherPath = Join-Path $testProject "desktop_launcher.ps1"
@@ -8,6 +10,13 @@ if (-not (Test-Path -LiteralPath $launcherPath)) {
     $launcherPath = Join-Path $testProject "launcher.ps1"
 }
 . $launcherPath
+
+# Restrict real fixture operations to this checkout and its central test areas.
+$materialTestProject = Split-Path -Parent $PSScriptRoot
+function Assert-ProjectChildPath {
+    param([string]$Path)
+    return Assert-ProjectTestPath $Path $materialTestProject
+}
 
 function Assert-Test {
     param([bool]$Condition, [string]$Message)
@@ -17,7 +26,7 @@ function Assert-Test {
 # Empty preference files can be left by an interrupted write. They must behave
 # like a missing preference, not call Trim() on PowerShell's null result.
 & {
-    $scratch = Join-Path $ProjectRoot ('trash\empty-preference-' + [Guid]::NewGuid().ToString('N'))
+    $scratch = Join-ProjectMaterialPath $ProjectRoot ('trash\empty-preference-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $scratch | Out-Null
     $emptyFile = Join-Path $scratch 'backend.txt'
     New-Item -ItemType File -Path $emptyFile | Out-Null
@@ -28,14 +37,14 @@ function Assert-Test {
 }
 
 if (Get-Command Get-SettingsPath -ErrorAction SilentlyContinue) {
-    Assert-Test ((Get-SettingsPath) -eq (Join-Path $ProjectRoot 'config\settings.json')) 'Portable GUI settings path'
-    Assert-Test ($ModeFile -eq (Join-Path $ProjectRoot 'config\desktop-python-mode.txt')) 'Portable Python preference'
-    Assert-Test ($BackendFile -eq (Join-Path $ProjectRoot 'config\desktop-backend.txt')) 'Portable backend preference'
+    Assert-Test ((Get-SettingsPath) -eq (Join-ProjectMaterialPath $ProjectRoot 'config\settings.json')) 'Portable GUI settings path'
+    Assert-Test ($ModeFile -eq (Join-ProjectMaterialPath $ProjectRoot 'config\desktop-python-mode.txt')) 'Portable Python preference'
+    Assert-Test ($BackendFile -eq (Join-ProjectMaterialPath $ProjectRoot 'config\desktop-backend.txt')) 'Portable backend preference'
     & {
-        $ProjectRoot = Join-Path $testProject ('trash\launcher-config-' + [Guid]::NewGuid().ToString('N'))
-        $WorkDir = Join-Path $ProjectRoot '.launcher'
-        $ModeFile = Join-Path $ProjectRoot 'config\desktop-python-mode.txt'
-        $BackendFile = Join-Path $ProjectRoot 'config\desktop-backend.txt'
+        $ProjectRoot = Join-ProjectMaterialPath $testProject ('trash\launcher-config-' + [Guid]::NewGuid().ToString('N'))
+        $WorkDir = Join-ProjectMaterialPath $ProjectRoot '.launcher'
+        $ModeFile = Join-ProjectMaterialPath $ProjectRoot 'config\desktop-python-mode.txt'
+        $BackendFile = Join-ProjectMaterialPath $ProjectRoot 'config\desktop-backend.txt'
         New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
         'Portable' | Set-Content -LiteralPath (Join-Path $WorkDir 'desktop-python-mode.txt') -Encoding ASCII
         'rocm' | Set-Content -LiteralPath (Join-Path $WorkDir 'desktop-backend.txt') -Encoding ASCII
@@ -104,7 +113,7 @@ Assert-Test (-not (Test-ReadyMarkerData ([pscustomobject]@{}) "rocm" "h" "p" "v"
 }
 
 & {
-    $scratch = Join-Path $ProjectRoot ('trash\full-runtime-check-' + [Guid]::NewGuid().ToString('N'))
+    $scratch = Join-ProjectMaterialPath $ProjectRoot ('trash\full-runtime-check-' + [Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($scratch) | Out-Null
     $probePath = Join-Path $scratch 'runtime-check.cmd'
     [IO.File]::WriteAllText($probePath, (@(
@@ -167,7 +176,7 @@ Assert-Test (-not (Test-ReadyMarkerData ([pscustomobject]@{}) "rocm" "h" "p" "v"
 
 # Failed backend repair must not change the saved working Python/backend choice.
 & {
-    $WorkDir = Join-Path $ProjectRoot ('trash\preference-tests-' + [Guid]::NewGuid().ToString('N'))
+    $WorkDir = Join-ProjectMaterialPath $ProjectRoot ('trash\preference-tests-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $WorkDir | Out-Null
     $ModeFile = Join-Path $WorkDir 'mode.txt'
     $BackendFile = Join-Path $WorkDir 'backend.txt'
@@ -217,7 +226,7 @@ Assert-Test (-not (Test-ReadyMarkerData ([pscustomobject]@{}) "rocm" "h" "p" "v"
 }
 
 & {
-    $scratch = Join-Path $ProjectRoot ('trash\gui-launch-system-' + [Guid]::NewGuid().ToString('N'))
+    $scratch = Join-ProjectMaterialPath $ProjectRoot ('trash\gui-launch-system-' + [Guid]::NewGuid().ToString('N'))
     Assert-ProjectChildPath $scratch | Out-Null
     $WorkDir = Join-Path $scratch '.launcher'
     $profile = Get-BackendProfile $matrix 'cpu'
@@ -272,14 +281,14 @@ Assert-Test (-not (Test-ReadyMarkerData ([pscustomobject]@{}) "rocm" "h" "p" "v"
     Assert-Test ([bool]$runtimePython) 'System Python is available for the isolated version test'
     $previousPythonHome = $env:PYTHONHOME
     try {
-        $env:PYTHONHOME = Join-Path $ProjectRoot 'missing-python-home-regression'
+        $env:PYTHONHOME = Join-ProjectMaterialPath $ProjectRoot 'missing-python-home-regression'
         Assert-Test ((Get-RuntimePythonVersion $runtimePython) -match '^3\.[0-9]+\.[0-9]+') 'Marker ignores an unrelated PYTHONHOME'
     }
     finally { $env:PYTHONHOME = $previousPythonHome }
 }
 
 & {
-    $WorkDir = Join-Path $ProjectRoot ('trash\launcher-lock-' + [Guid]::NewGuid().ToString('N'))
+    $WorkDir = Join-ProjectMaterialPath $ProjectRoot ('trash\launcher-lock-' + [Guid]::NewGuid().ToString('N'))
     $heldLock = Enter-LauncherLock
     function Invoke-LauncherSession { throw 'The busy launcher must not enter the session' }
     try {
@@ -318,7 +327,7 @@ Assert-Test (-not (Test-ReadyMarkerData ([pscustomobject]@{}) "rocm" "h" "p" "v"
 }
 
 & {
-    $WorkDir = Join-Path $ProjectRoot ('trash\hidden-early-failure-' + [Guid]::NewGuid().ToString('N'))
+    $WorkDir = Join-ProjectMaterialPath $ProjectRoot ('trash\hidden-early-failure-' + [Guid]::NewGuid().ToString('N'))
     $HiddenLaunch = $true
     $previousHiddenState = $script:WasHiddenBackgroundLaunch
     function Get-BackendMatrix { throw 'Simulated early matrix failure' }
@@ -339,7 +348,7 @@ Assert-Test (-not (Test-ReadyMarkerData ([pscustomobject]@{}) "rocm" "h" "p" "v"
 if ($Portable) {
     # Network integration regression: no GPU or global HIP SDK is needed to
     # build the small ROCm Python package that failed under embedded Python.
-    $scratch = Join-Path $ProjectRoot ("trash\portable-regression-" + [Guid]::NewGuid().ToString("N"))
+    $scratch = Join-ProjectMaterialPath $ProjectRoot ("trash\portable-regression-" + [Guid]::NewGuid().ToString("N"))
     Assert-ProjectChildPath $scratch | Out-Null
     $WorkDir = Join-Path $scratch ".launcher"
     $pythonRoot = Join-Path $scratch "python.new"

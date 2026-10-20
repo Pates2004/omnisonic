@@ -1,11 +1,17 @@
 [CmdletBinding()]
 param()
 
+. (Join-Path $PSScriptRoot '..\project_materials.ps1')
+
 $ErrorActionPreference = 'Stop'
 $testProject = Split-Path -Parent $PSScriptRoot
 . (Join-Path $testProject 'desktop_launcher.ps1')
-
-$sampleRoot = Assert-ProjectChildPath (Join-Path $ProjectRoot 'Workspace\amd-portable-validation')
+# The launcher still needs source files from its real ProjectRoot.
+function Assert-ProjectChildPath {
+    param([string]$Path)
+    return Assert-ProjectTestPath $Path $testProject
+}
+$sampleRoot = Assert-ProjectChildPath (Join-ProjectMaterialPath $testProject 'Workspace\amd-portable-validation')
 $stagingRoot = Join-Path $sampleRoot 'env.new'
 $activeRoot = Join-Path $sampleRoot 'env'
 $WorkDir = Join-Path $sampleRoot '.launcher'

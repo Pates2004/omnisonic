@@ -2,7 +2,6 @@
 
 import ast
 import os
-import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +18,8 @@ from omnisonic.validation import (
     output_directory_path,
     validation_error_message,
 )
+from tests.materials import scratch_directory
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -38,8 +39,7 @@ def handler(filename, name, **namespace):
 
 class OutputPathTests(unittest.TestCase):
     def setUp(self):
-        (ROOT / "trash").mkdir(exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix="output-paths-", dir=ROOT / "trash"))
+        self.scratch = scratch_directory("output-paths-")
         self.locales = load_locales((ROOT / "langs",))
 
     def test_copy_as_path_only_removes_one_complete_double_quote_wrapper(self):
