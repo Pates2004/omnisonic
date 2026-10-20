@@ -53,8 +53,9 @@ PyTorch installer profile.
 - `tests/test_power_switch.ps1`: synthetic transfers, checksums, paths, backups,
   collisions and rollback; no real user data is imported or exported by this test.
 - `tests/test_batch_paths.ps1`: paths containing spaces, `!`, `&` and parentheses.
-- `python -m tests.smoke_inference --backend cuda --output trash/my-inference-test`:
+- `python -m tests.smoke_inference --backend cuda --output <new-central-Workspace-path>`:
   optional real-device synthesis/clone test using already cached models only.
+  Resolve the output through `project_materials.ps1`, as shown in README.
 
 Tests reduce regression risk; they cannot guarantee zero bugs on every device,
 driver release or input file.
@@ -99,7 +100,8 @@ CUDA and Intel hardware were not available for a new physical-device retest here
 At the start of this audit, Whisper remained cached after its first use.
 `preload_asr=false` only controlled initial loading. Optional release policies
 were subsequently added as described below; automatic reference transcription
-remains a separate, default-enabled setting.
+is separate. It was default-enabled during this historical test; current
+releases default automatic reference transcription to off.
 
 ## Optional model release — 2026-09-12
 
@@ -142,3 +144,35 @@ again with the new options left off. Ruff lint/format and `pip check` also passe
 Physical release/reload validation in this follow-up is AMD-only. CUDA shares
 the same PyTorch API; Intel XPU cleanup is covered by logic tests, not by a new
 Intel hardware run.
+
+## Comprehensive regression review — 2026-10-20
+
+Current full suites pass on both system-based and portable Python:
+OmniSonic **504 tests / 2123 subtests**, independent Local Launcher
+**184 tests / 347 subtests**. Five optional LoRA tests per suite were skipped;
+the historical LoRA results above are not a fresh training retest.
+
+Fresh portable bootstrap/pip/ROCm source-wheel tests, launcher recovery and
+Power Switch pass. Twelve real-wx smoke scripts pass on each Python route,
+using synthetic profiles and mocked audio devices. Checks include preset
+editing, settings/reset/cancel, shortcuts, batch/subtitles and dark/light theme.
+
+Ordinary offline inference passed on AMD RX 9070 XT: long unpunctuated text,
+voice cloning/design, a precisely aligned two-cue subtitle WAV, long-reference
+Whisper transcription and actual Local Launcher loopback HTTP startup. WAV,
+FLAC, OGG Vorbis/Opus, MP3, AIFF, AU and CAF decoding/mono conversion/resampling
+were exercised with synthetic audio. No microphone/private reference was used.
+
+Fixes include bounded owned read-only launcher probes, redirected-path cleanup
+protection, primary-error preservation, settings isolation, quoted audio paths,
+generation-config validation, bounded long-text splitting and a shared duration
+budget across chunks. See [generation parameters](generation-parameters.md) for
+why chunk joins/padding can change final waveform length.
+
+Po polsku: pełne testy przeszły dla Pythona systemowego i przenośnego, podobnie
+jak próby interfejsu, instalacji i zwykła synteza na AMD. Nie oznacza to testu
+każdego sterownika: w tym przeglądzie nie było fizycznej karty NVIDIA/Intel,
+sesji NVDA ani prawdziwego mikrofonu. Wcześniejszego problemu zamykania po
+celowo wywołanym natywnym błędzie GPU nie uznajemy za naprawiony. Nowy limit
+kontroli środowiska daje diagnozę i zatrzymuje własne procesy, nie naprawia
+sterownika. Nie gwarantujemy braku wszystkich możliwych błędów.

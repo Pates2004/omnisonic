@@ -48,7 +48,7 @@ def load_locales(search_directories: Iterable[Path]) -> dict[str, dict[str, str]
                 ):
                     raise ValueError("locale must contain string keys and values")
                 locales[code] = data
-            except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            except (OSError, UnicodeError, ValueError, RecursionError) as exc:
                 logger.warning("Could not load locale %s: %s", locale_file, exc)
 
     if "en" not in locales:

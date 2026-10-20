@@ -136,6 +136,19 @@ starting it a second time. Full validation runs during installation, with
 `-InstallOnly`, or once after installer inputs/hardware change. A stale marker alone
 does not trigger a new download: a working runtime is validated and reused.
 
+Read-only Python discovery has a 10-second deadline per candidate; runtime
+checks have a 300-second deadline. Adjust them with `-DiscoveryTimeoutSeconds`
+and `-ProbeTimeoutSeconds` when needed. A timed-out check stops only its owned
+process tree, reports its phase and diagnostic logs, and does not automatically
+reinstall packages or silently switch to CPU. These deadlines do not interrupt
+package installation, downloads, or actual speech generation.
+
+Po polsku: wykrywanie Pythona ma limit 10 sekund na kandydata, a kontrole
+środowiska 300 sekund. Opcje `-DiscoveryTimeoutSeconds` i `-ProbeTimeoutSeconds`
+pozwalają je zmienić. Przekroczenie limitu kończy tylko procesy danej kontroli,
+z podaniem etapu i logów. Nie uruchamia automatycznie reinstalacji ani CPU.
+Limity nie dotyczą pobierania, instalacji pakietów ani generowania mowy.
+
 AMD ROCm is enabled as a supported profile, including the Radeon 8060S; support
 still depends on the GPU, Windows, and driver requirements in the backend matrix.
 The installer supplies the profile's ROCm SDK Python packages inside its private

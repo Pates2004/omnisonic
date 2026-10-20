@@ -223,7 +223,7 @@ class BatchTabMixin:
                     )
                     return
             else:
-                reference = self.clone_ref_audio.GetValue().strip()
+                reference = normalize_pasted_path(self.clone_ref_audio.GetValue())
                 if not reference or not Path(reference).is_file():
                     wx.MessageBox(self._("err_no_audio_preset"), self._("error_title"), parent=self)
                     return

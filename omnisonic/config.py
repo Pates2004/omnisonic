@@ -47,7 +47,10 @@ def _program_dir() -> Path:
         return PROJECT_ROOT
     if sys.prefix != getattr(sys, "base_prefix", sys.prefix):
         return Path(sys.prefix).resolve().parent
-    return Path.cwd().resolve()
+    raise OSError(
+        "Cannot determine OmniSonic's program directory. Start with start_desktop.bat "
+        "or set OMNISONIC_APP_DIR to an explicit writable program directory."
+    )
 
 
 PROGRAM_DIR = _program_dir()
@@ -241,7 +244,7 @@ def load_config(path: Path | str = CONFIG_FILE) -> dict[str, Any]:
         if not isinstance(data, dict):
             raise ValueError("configuration root must be a JSON object")
         return normalize_config(data)
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
         logger.warning("Could not load configuration from %s: %s", path, exc)
         return deepcopy(DEFAULT_CONFIG)
 
@@ -290,7 +293,7 @@ def migrate_legacy_user_data() -> None:
             data = json.loads(source.read_text(encoding="utf-8-sig"))
             if not isinstance(data, dict):
                 raise ValueError("configuration root must be a JSON object")
-        except (OSError, UnicodeError, ValueError) as exc:
+        except (OSError, UnicodeError, ValueError, RecursionError) as exc:
             logger.warning("Could not read old settings %s: %s", source, exc)
             continue
         save_config(data, CONFIG_FILE)

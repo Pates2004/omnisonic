@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, call
 
 from omnisonic.operations import OperationState
+from omnisonic.validation import normalize_pasted_path
 
 
 class DispatchTests(unittest.TestCase):
@@ -338,7 +339,12 @@ class CompletionFocusTests(unittest.TestCase):
             for node in ast.walk(source)
             if isinstance(node, ast.FunctionDef) and node.name in self.handlers
         ]
-        self.namespace = {"wx": Mock(), "np": np, "os": Mock()}
+        self.namespace = {
+            "wx": Mock(),
+            "np": np,
+            "os": Mock(),
+            "normalize_pasted_path": normalize_pasted_path,
+        }
         exec(compile(ast.Module(body=methods, type_ignores=[]), "focus", "exec"), self.namespace)
 
     def frame(self, shown, enabled):

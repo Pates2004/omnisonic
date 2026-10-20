@@ -12,13 +12,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+logger = logging.getLogger(__name__)
+
 
 def _publish_process(path: str | None) -> None:
     if path:
         target = Path(path)
         temporary = target.with_name(f"{target.name}.{os.getpid()}.tmp")
-        temporary.write_text(str(os.getpid()), encoding="ascii")
-        os.replace(temporary, target)
+        try:
+            temporary.write_text(str(os.getpid()), encoding="ascii")
+            os.replace(temporary, target)
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Could not remove partial process marker %s: %s", temporary, exc)
 
 
 def announce_window() -> None:
@@ -26,10 +34,9 @@ def announce_window() -> None:
 
 
 def run(start_application: Callable[[], int] | None = None) -> int:
-    _publish_process(os.environ.get("OMNISONIC_STARTUP_PROCESS"))
-
     def start() -> int:
         try:
+            _publish_process(os.environ.get("OMNISONIC_STARTUP_PROCESS"))
             application = start_application
             if application is None:
                 from .app import main

@@ -137,8 +137,9 @@ def main():
             print("Normalization: all desktop modes, both locales, Auto guard and batch WAV: OK")
         finally:
             frame.prog_timer.Stop()
-            if frame.play_timer is not None:
-                frame.play_timer.Stop()
+            play_timer = getattr(frame, "play_timer", None)
+            if play_timer is not None:
+                play_timer.Stop()
             frame.Destroy()
             app.Yield()
     print(f"Synthetic fixtures: {scratch}")

@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
+from omnisonic.validation import normalize_pasted_path
+
 
 class Button:
     def __init__(self, label):
@@ -27,6 +29,7 @@ class PlaybackTests(unittest.TestCase):
         waveform.__getitem__.return_value = list(range(100))
         namespace = {
             "wx": self.wx,
+            "normalize_pasted_path": normalize_pasted_path,
             "sd": Mock(),
             "os": SimpleNamespace(path=SimpleNamespace(exists=lambda path: True)),
             "load_waveform": lambda path: (waveform, 100),

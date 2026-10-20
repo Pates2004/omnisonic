@@ -19,6 +19,7 @@ function Assert-RecoveryTest {
 & {
     $scratch = Join-ProjectMaterialPath $testProject ('trash\native-probe-' + [Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($scratch) | Out-Null
+    $WorkDir = Join-Path $scratch '.launcher'
     $probePath = Join-Path $scratch 'python-probe.cmd'
     [IO.File]::WriteAllText($probePath,
         "@echo off`r`necho Native compatibility diagnostic 1>&2`r`nexit /b %OMNISONIC_TEST_PROBE_EXIT%`r`n")
@@ -189,6 +190,39 @@ foreach ($scenario in @('interrupted-download', 'bad-checksum', 'extraction-fail
             }
         }
         if ($scenario -ne 'success') { Assert-RecoveryTest ($state.pip -eq 0) 'Failed preparation does not run pip' }
+    }
+}
+if (Get-Command Start-DesktopGui -ErrorAction SilentlyContinue) {
+    foreach ($cleanupFailure in @($false, $true)) {
+        & {
+            $ProjectRoot = Join-ProjectMaterialPath $testProject ('trash\virtual-gui-cleanup-' + [Guid]::NewGuid().ToString('N'))
+            $WorkDir = Join-Path $ProjectRoot '.launcher'
+            $cleanupState = @{ attempts = 0; warnings = @() }
+            function Get-GuiPython { return 'synthetic-pythonw.exe' }
+            function New-Item {}
+            function Start-Process { throw 'ORIGINAL_GUI_STARTUP_FAILURE' }
+            function Test-Path { return $true }
+            function Remove-Item {
+                $cleanupState.attempts++
+                if ($cleanupFailure) { throw 'SECONDARY_HANDSHAKE_CLEANUP_FAILURE' }
+            }
+            function Write-WarningMessage { param($Message); $cleanupState.warnings += $Message }
+            $previousLog = $env:OMNISONIC_STARTUP_LOG
+            $previousReady = $env:OMNISONIC_STARTUP_READY
+            $previousProcess = $env:OMNISONIC_STARTUP_PROCESS
+            $failure = $null
+            try { Start-DesktopGui 'synthetic-python.exe' $true }
+            catch { $failure = $_.Exception.Message }
+            Assert-RecoveryTest ($failure -match 'ORIGINAL_GUI_STARTUP_FAILURE') 'Handshake cleanup does not hide startup cause'
+            Assert-RecoveryTest ($cleanupState.attempts -eq 2) 'Both handshake paths receive independent cleanup attempts'
+            Assert-RecoveryTest ($env:OMNISONIC_STARTUP_LOG -eq $previousLog -and $env:OMNISONIC_STARTUP_READY -eq $previousReady -and $env:OMNISONIC_STARTUP_PROCESS -eq $previousProcess) 'Startup environment is restored despite cleanup failure'
+            if ($cleanupFailure) {
+                Assert-RecoveryTest ($cleanupState.warnings.Count -eq 2) 'Each retained handshake file is reported'
+                Assert-RecoveryTest (($cleanupState.warnings -join ' ') -match 'desktop-ready-' -and ($cleanupState.warnings -join ' ') -match 'desktop-process-' -and ($cleanupState.warnings -join ' ') -match 'SECONDARY_HANDSHAKE_CLEANUP_FAILURE') 'Cleanup warnings retain paths and secondary cause'
+            } else {
+                Assert-RecoveryTest ($cleanupState.warnings.Count -eq 0) 'Successful cleanup needs no warnings'
+            }
+        }
     }
 }
 Write-Host 'Launcher recovery tests: OK (native stderr, Python replacement, rollback and bootstrap failures)'

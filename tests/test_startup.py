@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from omnisonic.startup import announce_window, run
 from omnisonic.operations import OperationState, execute_worker
@@ -36,6 +36,40 @@ class StartupTests(unittest.TestCase):
         self.assertIn("Simulated early import failure", log_file.read_text(encoding="utf-8"))
         self.assertIs(sys.stdout, old_stdout)
         self.assertIs(sys.stderr, old_stderr)
+
+    def test_process_marker_failure_is_logged_before_application_starts(self):
+        log_file = self.folder / "marker-error.log"
+        marker = self.folder / "process.txt"
+        application = Mock()
+        with (
+            patch.dict(
+                os.environ,
+                {"OMNISONIC_STARTUP_LOG": str(log_file), "OMNISONIC_STARTUP_PROCESS": str(marker)},
+            ),
+            patch(
+                "omnisonic.startup.os.replace", side_effect=PermissionError("Process marker locked")
+            ),
+        ):
+            self.assertEqual(run(application), 1)
+        application.assert_not_called()
+        self.assertIn("Process marker locked", log_file.read_text(encoding="utf-8"))
+        self.assertEqual(list(self.folder.glob("*.tmp")), [])
+
+    def test_marker_cleanup_error_does_not_replace_original_failure(self):
+        marker = self.folder / "ready.txt"
+        with (
+            patch.dict(os.environ, {"OMNISONIC_STARTUP_READY": str(marker)}),
+            patch(
+                "omnisonic.startup.os.replace",
+                side_effect=PermissionError("Original marker failure"),
+            ),
+            patch("pathlib.Path.unlink", side_effect=PermissionError("Secondary cleanup failure")),
+            self.assertLogs("omnisonic.startup", level="WARNING") as messages,
+        ):
+            with self.assertRaisesRegex(PermissionError, "Original marker failure"):
+                announce_window()
+        self.assertIn("Secondary cleanup failure", "\n".join(messages.output))
+        self.assertIn(str(marker) + ".", "\n".join(messages.output))
 
     def test_success_records_runtime_and_readiness(self):
         log_file = self.folder / "startup.log"

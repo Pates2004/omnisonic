@@ -377,6 +377,32 @@ class RecordingTests(unittest.TestCase):
         self.frame._CloseRecording()
         self.assertIsNone(self.frame.rec_stream)
 
+    def test_failed_stream_close_does_not_hide_original_stop_error_or_audio(self):
+        stream = Mock()
+        stream.stop.side_effect = RuntimeError("Primary microphone stop failure")
+        stream.close.side_effect = RuntimeError("Secondary microphone close failure")
+        self.frame.rec_stream = stream
+        chunks = [np.ones((10, 1))]
+        self.frame.rec_data = chunks
+        with self.assertLogs(level="WARNING") as messages:
+            with self.assertRaisesRegex(RuntimeError, "Primary microphone stop failure"):
+                self.frame._CloseRecording()
+        stream.stop.assert_called_once_with(ignore_errors=False)
+        stream.close.assert_called_once_with(ignore_errors=False)
+        self.assertIsNone(self.frame.rec_stream)
+        self.assertIs(self.frame.rec_data, chunks)
+        self.assertIn("Secondary microphone close failure", "\n".join(messages.output))
+
+    def test_stream_close_failure_after_successful_stop_is_still_reported(self):
+        stream = Mock()
+        stream.close.side_effect = RuntimeError("Microphone close failure")
+        self.frame.rec_stream = stream
+        with self.assertRaisesRegex(RuntimeError, "Microphone close failure"):
+            self.frame._CloseRecording()
+        stream.stop.assert_called_once_with(ignore_errors=False)
+        stream.close.assert_called_once_with(ignore_errors=False)
+        self.assertIsNone(self.frame.rec_stream)
+
 
 class RecordingGatingTests(unittest.TestCase):
     def setUp(self):

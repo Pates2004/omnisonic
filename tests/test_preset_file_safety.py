@@ -16,6 +16,7 @@ from omnisonic.operations import OperationCancelled, OperationState
 from omnisonic.validation import (
     FilenameValidationError,
     is_path_link,
+    normalize_pasted_path,
     preset_filename,
     safe_child_path,
     validation_error_message,
@@ -78,6 +79,7 @@ class PresetFileSafetyTests(unittest.TestCase):
             "wx": self.wx,
             "PRESETS_DIR": self.directory,
             "safe_child_path": safe_child_path,
+            "normalize_pasted_path": normalize_pasted_path,
             "validation_error_message": validation_error_message,
             "logging": logging,
             "os": os,
@@ -346,6 +348,7 @@ class PresetRenameTests(unittest.TestCase):
                 atomic_write=atomic_write,
                 preset_filename=preset_filename,
                 safe_child_path=safe_child_path,
+                normalize_pasted_path=normalize_pasted_path,
                 validation_error_message=validation_error_message,
                 VoiceClonePrompt=Mock(load=Mock(return_value=self.loaded_prompt)),
                 PresetEditDialog=Mock(return_value=self.dialog),
@@ -446,6 +449,19 @@ class PresetRenameTests(unittest.TestCase):
                         self.frame._UpdatePresetWorker(state, prompt, target, original)
                 self.assertEqual([path.name for path in self.directory.iterdir()], ["Voice.pt"])
                 self.assertEqual(original.read_bytes(), b"original preset")
+
+    def test_edit_accepts_source_audio_wrapped_by_windows_copy_as_path(self):
+        source = self.directory / "synthetic speaker's reference.wav"
+        source.write_bytes(b"synthetic reference; model decoding is mocked")
+        self.dialog.source_ctrl.GetValue.return_value = f'"{source}"'
+        self.edit("Voice.pt", "Updated voice")
+        self.frame._StartPresetRebuild.assert_called_once_with(
+            str(source),
+            "Updated transcript",
+            self.directory / "Updated voice.pt",
+            original_path=self.directory / "Voice.pt",
+        )
+        self.wx.MessageBox.assert_not_called()
 
     def test_source_cleanup_respects_native_path_identity_not_blanket_casefolding(self):
         for path_type, root, remove_original in (

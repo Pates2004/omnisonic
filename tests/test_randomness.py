@@ -248,6 +248,20 @@ class SeededGenerationTests(unittest.TestCase):
         self.assertEqual(self.states()[:3], before[:3])
         self.assertEqual(self.cuda.current, 0)
 
+    def test_restore_failure_does_not_replace_the_primary_generation_error(self):
+        before = self.states()
+        self.cuda.fail_restore = True
+        with (
+            self.assertLogs("omnisonic.randomness", level="WARNING") as messages,
+            self.assertRaisesRegex(RuntimeError, "primary generation failure"),
+        ):
+            with seeded_generation(88, "cuda:1"):
+                self.draw(self.cuda, 1)
+                raise RuntimeError("primary generation failure")
+        self.assertIn("restore failure", " ".join(messages.output))
+        self.assertEqual(self.states()[:3], before[:3])
+        self.assertEqual(self.cuda.current, 0)
+
     def test_unsupported_device_does_not_change_rngs(self):
         before = self.states()
         with self.assertRaisesRegex(ValueError, "Unsupported generation seed device"):

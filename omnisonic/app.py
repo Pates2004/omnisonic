@@ -699,7 +699,9 @@ class ShortcutCaptureDialog(wx.Dialog):
         try:
             self.captured_shortcut = _shortcut_from_key_event(event)
         except ValueError:
-            self.instructions.SetLabel(self._("shortcut_capture_invalid"))
+            message = self._("shortcut_capture_invalid")
+            self.instructions.SetLabel(message)
+            self.instructions.SetName(message)
             self.instructions.GetParent().Layout()
             return
         self.EndModal(wx.ID_OK)
@@ -741,6 +743,9 @@ class PresetEditDialog(wx.Dialog):
         buttons = wx.BoxSizer(wx.HORIZONTAL)
         ok_button = wx.Button(panel, wx.ID_OK, self._("btn_save"))
         cancel_button = wx.Button(panel, wx.ID_CANCEL, self._("btn_cancel"))
+        ok_button.SetDefault()
+        self.SetAffirmativeId(wx.ID_OK)
+        self.SetEscapeId(wx.ID_CANCEL)
         buttons.Add(ok_button, 1, wx.RIGHT, 5)
         buttons.Add(cancel_button, 1)
         layout.Add(buttons, 0, wx.ALL | wx.EXPAND, 10)
@@ -768,7 +773,7 @@ class PresetEditDialog(wx.Dialog):
 
 class SettingsDialog(wx.Dialog):
     def __init__(self, parent, is_first_run=False, current_cfg=None):
-        self.cfg = current_cfg or LoadBasicConfig()
+        self.cfg = deepcopy(current_cfg) if current_cfg is not None else LoadBasicConfig()
         self.is_first_run = is_first_run
         self.lang = self.cfg.get("language", "en")
         title = self._("first_run_title") if is_first_run else self._("settings_title")
@@ -1152,6 +1157,9 @@ class SettingsDialog(wx.Dialog):
             "ai_fade_duration": parent.spin_fade_duration.GetValue(),
             "clone_instruct": parent.clone_instruct.GetValue(),
             "design_instruct": parent.design_custom_instruct.GetValue(),
+            "clone_lang": parent.clone_lang.GetValue(),
+            "design_lang": parent.design_lang.GetValue(),
+            "auto_lang": parent.auto_lang.GetValue(),
             "use_duration": parent.chk_duration.GetValue(),
             "duration_val": parent.spin_duration.GetValue(),
         }
@@ -1180,6 +1188,8 @@ class SettingsDialog(wx.Dialog):
         parent.spin_fade_duration.SetValue(str(state["ai_fade_duration"]))
         parent.clone_instruct.SetValue(state["clone_instruct"])
         parent.design_custom_instruct.SetValue(state["design_instruct"])
+        for name in ("clone_lang", "design_lang", "auto_lang"):
+            getattr(parent, name).SetValue(state[name])
         parent.chk_duration.SetValue(state["use_duration"])
         parent.spin_duration.SetValue(state["duration_val"])
 
@@ -1509,6 +1519,8 @@ class SettingsDialog(wx.Dialog):
                 parent.spin_fade_duration.SetValue(str(defaults["ai_fade_duration"]))
                 parent.clone_instruct.SetValue(defaults["clone_instruct"])
                 parent.design_custom_instruct.SetValue(defaults["design_instruct"])
+                for name in ("clone_lang", "design_lang", "auto_lang"):
+                    getattr(parent, name).SetValue(defaults[name])
                 parent.chk_duration.SetValue(defaults["use_duration"])
                 parent.spin_duration.SetValue(defaults["duration_val"])
             wx.MessageBox(self._("reset_ok"), self._("info_title"), wx.OK | wx.ICON_INFORMATION)
@@ -2452,6 +2464,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         vbox.Add(ref_text_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
         self.preset_source_ref_text = wx.TextCtrl(tab)
         self.preset_source_ref_text.SetName(self._("preset_source_ref_text"))
+        self.preset_source_audio.Bind(wx.EVT_TEXT, self.OnPresetSourceChanged)
         vbox.Add(self.preset_source_ref_text, 0, wx.ALL | wx.EXPAND, 5)
 
         self.btn_save_preset = wx.Button(tab, label=self._("btn_save_preset_clone"))
@@ -2459,6 +2472,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         vbox.Add(self.btn_save_preset, 0, wx.ALL | wx.EXPAND, 5)
 
         tab.SetSizer(vbox)
+
+    def OnPresetSourceChanged(self, event):
+        self.preset_source_ref_text.ChangeValue("")
+        event.Skip()
 
     def SetupDesignTab(self, tab):
         vbox = wx.BoxSizer(wx.VERTICAL)
@@ -2728,7 +2745,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if isinstance(active, wx.Dialog) and active.IsModal():
             self._reference_timer = wx.CallLater(600, self._MaybeAutoTranscribeReference)
             return
-        path = self.clone_ref_audio.GetValue().strip()
+        path = normalize_pasted_path(self.clone_ref_audio.GetValue())
         if not os.path.isfile(path):
             return
         self.OnTranscribeReference(None, automatic=True)
@@ -2739,7 +2756,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if not self._CanUseModel():
             wx.MessageBox(self._("msg_load_first"), self._("error_title"))
             return
-        path = self.clone_ref_audio.GetValue().strip()
+        path = normalize_pasted_path(self.clone_ref_audio.GetValue())
         if not os.path.isfile(path):
             wx.MessageBox(
                 self._("err_file_not_found"), self._("error_title"), wx.OK | wx.ICON_ERROR
@@ -2753,7 +2770,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         def on_success(text):
             if (
                 self._reference_revision != revision
-                or self.clone_ref_audio.GetValue().strip() != path
+                or normalize_pasted_path(self.clone_ref_audio.GetValue()) != path
             ):
                 return
             if self.clone_ref_text.GetValue() != previous_text:
@@ -3021,7 +3038,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             lang = None
 
         ref_text = self.clone_ref_text.GetValue().strip() or None
-        ref_audio = self.clone_ref_audio.GetValue().strip()
+        ref_audio = normalize_pasted_path(self.clone_ref_audio.GetValue())
         instruct = self.clone_instruct.GetValue().strip() or None
         preset_idx = self.combo_presets.GetSelection()
         preset = (
@@ -3283,6 +3300,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self._PromptAndSavePreset(ref_audio, ref_text)
 
     def _PromptAndSavePreset(self, ref_audio, ref_text):
+        ref_audio = normalize_pasted_path(ref_audio)
         if not self._CanUseModel():
             wx.MessageBox(self._("msg_load_first"), self._("error_title"))
             return
@@ -3432,7 +3450,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             )
             return
 
-        source_audio = dialog.source_ctrl.GetValue().strip()
+        source_audio = normalize_pasted_path(dialog.source_ctrl.GetValue())
         ref_text = dialog.ref_text_ctrl.GetValue().strip()
         dialog.Destroy()
 
@@ -3789,7 +3807,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         import time
 
         if self._reference_playback_state == "stopped":
-            path = path_ctrl.GetValue().strip()
+            path = normalize_pasted_path(path_ctrl.GetValue())
             if not os.path.exists(path):
                 wx.MessageBox(
                     self._("err_file_not_found"), self._("error_title"), wx.OK | wx.ICON_ERROR
@@ -3879,7 +3897,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if stream is not None:
             try:
                 stream.stop(ignore_errors=False)
-            finally:
+            except BaseException:
+                try:
+                    stream.close(ignore_errors=False)
+                except Exception as exc:
+                    logging.warning("Could not close failed recording stream: %s", exc)
+                raise
+            else:
                 stream.close(ignore_errors=False)
 
     def _UpdateRecordingControls(self, button):

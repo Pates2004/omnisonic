@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import random
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -30,35 +33,49 @@ def seeded_generation(seed: int | None, device: Any) -> Iterator[None]:
 
     # Register each restoration immediately. ExitStack attempts the remaining
     # restorations even if acquiring/seeding/restoring another RNG raises.
+    error_in_flight = False
+
+    def restore_rng(callback, *args):
+        try:
+            callback(*args)
+        except Exception as exc:
+            if not error_in_flight:
+                raise
+            logger.warning("Could not restore a generation RNG after an earlier failure: %s", exc)
+
     with ExitStack() as restore:
-        restore.callback(random.setstate, random.getstate())
-        import numpy as np
+        try:
+            restore.callback(restore_rng, random.setstate, random.getstate())
+            import numpy as np
 
-        restore.callback(np.random.set_state, np.random.get_state())
-        import torch
+            restore.callback(restore_rng, np.random.set_state, np.random.get_state())
+            import torch
 
-        restore.callback(torch.set_rng_state, torch.get_rng_state())
-        resolved = torch.device(device)
-        if resolved.type not in ("cpu", "cuda", "xpu"):
-            raise ValueError(f"Unsupported generation seed device: {resolved.type}.")
+            restore.callback(restore_rng, torch.set_rng_state, torch.get_rng_state())
+            resolved = torch.device(device)
+            if resolved.type not in ("cpu", "cuda", "xpu"):
+                raise ValueError(f"Unsupported generation seed device: {resolved.type}.")
 
-        accelerator = None
-        index = None
-        if resolved.type != "cpu":
-            accelerator = getattr(torch, resolved.type)
-            index = resolved.index
-            if index is None:
-                index = accelerator.current_device()
-            state = accelerator.get_rng_state(index)
-            restore.callback(accelerator.set_rng_state, state, index)
+            accelerator = None
+            index = None
+            if resolved.type != "cpu":
+                accelerator = getattr(torch, resolved.type)
+                index = resolved.index
+                if index is None:
+                    index = accelerator.current_device()
+                state = accelerator.get_rng_state(index)
+                restore.callback(restore_rng, accelerator.set_rng_state, state, index)
 
-        random.seed(seed)
-        np.random.seed(seed)
-        # torch.manual_seed also seeds all GPUs, including unrelated devices.
-        torch.default_generator.manual_seed(seed)
-        if accelerator is not None:
-            # get_rng_state above initialized this backend, so manual_seed's
-            # lazy callback runs now, while the selected device is current.
-            with accelerator.device(index):
-                accelerator.manual_seed(seed)
-        yield
+            random.seed(seed)
+            np.random.seed(seed)
+            # torch.manual_seed also seeds all GPUs, including unrelated devices.
+            torch.default_generator.manual_seed(seed)
+            if accelerator is not None:
+                # get_rng_state above initialized this backend, so manual_seed's
+                # lazy callback runs now, while the selected device is current.
+                with accelerator.device(index):
+                    accelerator.manual_seed(seed)
+            yield
+        except BaseException:
+            error_in_flight = True
+            raise

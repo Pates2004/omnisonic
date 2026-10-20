@@ -235,6 +235,8 @@ class GenerationSeedPreferenceTests(unittest.TestCase):
         handler("SetupAdvTab", wx=wx, AccessibleFloatCtrl=SeedControl)(parent, Mock())
         parent.clone_instruct = SeedControl(value="")
         parent.design_custom_instruct = SeedControl(value="")
+        for name in ("clone_lang", "design_lang", "auto_lang"):
+            setattr(parent, name, SeedControl(value=parent.cfg[name]))
         return parent
 
     def test_seed_controls_obey_remember_setting_and_toggle_enabled_state(self):

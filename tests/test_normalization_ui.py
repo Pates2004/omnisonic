@@ -9,7 +9,8 @@ from unittest.mock import Mock, patch
 
 from omnisonic.i18n import load_locales, translate
 from omnisonic.randomness import seeded_generation
-from omnisonic.validation import operation_error_message
+from omnisonic.subtitles import SubtitleError
+from omnisonic.validation import normalize_pasted_path, operation_error_message
 
 ROOT = Path(__file__).resolve().parents[1]
 NORMALIZATION_ERROR_KEYS = (
@@ -62,6 +63,7 @@ class NormalizationUITests(unittest.TestCase):
         )
         namespace = {
             "wx": self.wx,
+            "normalize_pasted_path": normalize_pasted_path,
             "operation_error_message": operation_error_message,
             "seeded_generation": seeded_generation,
         }
@@ -191,6 +193,18 @@ class NormalizationUITests(unittest.TestCase):
     def test_unrelated_errors_keep_their_details(self):
         for error in (ValueError("Original details"), NormalizationError("unknown", "en")):
             self.assertEqual(operation_error_message(error, self.frame._), str(error))
+
+    def test_subtitle_error_localization_does_not_depend_on_mocked_engine_modules(self):
+        error = SubtitleError("subtitle_empty_cue", index=3)
+        for locale in ("pl", "en"):
+            with self.subTest(locale=locale):
+                self.frame._.side_effect = lambda key, locale=locale: translate(
+                    self.locales, locale, key
+                )
+                self.assertEqual(
+                    operation_error_message(error, self.frame._),
+                    self.locales[locale]["subtitle_empty_cue"].format(index=3),
+                )
 
 
 if __name__ == "__main__":
