@@ -354,7 +354,7 @@
     "subtitle_timeline_limit": "The subtitle timeline exceeds the limit of {max_hours} hours.",
     "subtitle_cue_too_long": "Subtitle {index} exceeds {max_seconds} seconds. Split it into shorter cues.",
     "subtitle_audio_invalid": "Subtitle {index} produced empty or invalid audio.",
-    "subtitle_audio_overflow": "Subtitle {index}: generated audio lasts {actual_seconds:.3f} s, but only {available_seconds:.3f} s are available. Increase the cue duration or split the text; speech was not trimmed.",
+    "subtitle_audio_overflow": "Subtitle {index}: generated audio lasts {actual_seconds:.6f} s, but only {available_seconds:.6f} s are available. Increase the cue duration or split the text; speech was not trimmed.",
     "subtitle_generation_failed": "Subtitle {index} could not be generated: {error}",
     "subtitle_invalid_sample_rate": "The model returned an invalid audio sample rate.",
     "subtitle_output_too_large": "This subtitle track would exceed the supported WAV file size. Split the subtitles or use a lower sample rate."

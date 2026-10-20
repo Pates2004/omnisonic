@@ -40,8 +40,8 @@ _MESSAGES = {
     "subtitle_cue_too_long": "Subtitle {index} exceeds {max_seconds} seconds; split it first.",
     "subtitle_audio_invalid": "Subtitle {index} did not produce finite, nonempty mono audio.",
     "subtitle_audio_overflow": (
-        "Subtitle {index} produced {actual_seconds:.3f} seconds of audio for a "
-        "{available_seconds:.3f}-second interval. No speech was trimmed."
+        "Subtitle {index} produced {actual_seconds:.6f} seconds of audio for a "
+        "{available_seconds:.6f}-second interval. No speech was trimmed."
     ),
     "subtitle_invalid_sample_rate": "Subtitle audio sample rate must be a positive integer.",
     "subtitle_output_too_large": "Subtitle audio would exceed the WAV container size limit.",

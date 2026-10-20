@@ -354,7 +354,7 @@
     "subtitle_timeline_limit": "Oś czasu napisów przekracza limit {max_hours} godzin.",
     "subtitle_cue_too_long": "Pozycja napisów {index} przekracza {max_seconds} sekund. Podziel ją na krótsze pozycje.",
     "subtitle_audio_invalid": "Pozycja napisów {index} dała puste lub nieprawidłowe audio.",
-    "subtitle_audio_overflow": "Pozycja napisów {index}: wygenerowane audio trwa {actual_seconds:.3f} s, a dostępny czas to {available_seconds:.3f} s. Wydłuż przedział albo podziel tekst; mowa nie została ucięta.",
+    "subtitle_audio_overflow": "Pozycja napisów {index}: wygenerowane audio trwa {actual_seconds:.6f} s, a dostępny czas to {available_seconds:.6f} s. Wydłuż przedział albo podziel tekst; mowa nie została ucięta.",
     "subtitle_generation_failed": "Nie udało się wygenerować pozycji napisów {index}: {error}",
     "subtitle_invalid_sample_rate": "Model zwrócił nieprawidłową częstotliwość próbkowania audio.",
     "subtitle_output_too_large": "Ta ścieżka napisów przekroczyłaby obsługiwany rozmiar pliku WAV. Podziel napisy albo użyj niższej częstotliwości próbkowania."
