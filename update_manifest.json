@@ -33,7 +33,7 @@
     },
     {
       "path": ".github/workflows/quality.yml",
-      "sha256": "a03ac300cd67293aace4d1c8211ce348a009c863c975c5a5419892893dd39f57"
+      "sha256": "814bdda963a27d43ad5fd40caea955fb6b614e841756920f14d79a032a2ca94b"
     },
     {
       "path": ".github/workflows/stale.yml",
@@ -57,7 +57,7 @@
     },
     {
       "path": "desktop_update_runtime.ps1",
-      "sha256": "4a7171ffbe485dd96dbe48661c030ee6e6f5fc475eeb884e1d915ac70db043df"
+      "sha256": "9adcb1358f5d3154382cd4bf8424be77eccb150a35ac8b560a173b882f8ab707"
     },
     {
       "path": "desktop_updater.ps1",
@@ -625,7 +625,7 @@
     },
     {
       "path": "tests/test_desktop_update_runtime.ps1",
-      "sha256": "4f838d36c7d07615d44019f01d0bd3481ff6dd48b4e7bdbffaf2f281632328fc"
+      "sha256": "d8472587e668aeef9301c58e87bd81b76817148eda27faa3503d5473b2aeab0a"
     },
     {
       "path": "tests/test_desktop_updater.ps1",

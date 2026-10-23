@@ -266,7 +266,7 @@ function Get-DesktopUpdateGitContext {
     foreach ($name in @('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_CONFIG', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT')) {
         if ([Environment]::GetEnvironmentVariable($name, 'Process')) { throw "Git redirection environment is not supported: $name" }
     }
-    $gitCommand = Get-Command git.exe -CommandType Application -ErrorAction Stop
+    $gitCommand = Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $git = $gitCommand.Source
     $top = (Invoke-DesktopUpdateGit $git $root @('rev-parse', '--show-toplevel')).Lines -join ''
     if ([IO.Path]::GetFullPath($top).TrimEnd('\', '/') -ine $root) { throw 'Git root does not match the application.' }
@@ -313,6 +313,55 @@ function Get-DesktopUpdateGitContext {
     return [pscustomobject]@{ Git = $git; Root = $root; OldSha = $oldSha; Ref = $branch; IndexPath = Join-Path $dotGit 'index'; HeadHash = Get-DesktopUpdateFileHash (Join-Path $dotGit 'HEAD') -Raw }
 }
 
+function Get-DesktopUpdateGitBlobHash {
+    param([byte[]]$Bytes)
+    $sha = [Security.Cryptography.SHA1]::Create()
+    try {
+        [byte[]]$header = [Text.Encoding]::ASCII.GetBytes(('blob ' + $Bytes.Length + [char]0))
+        $combined = New-Object byte[] ($header.Length + $Bytes.Length)
+        [Array]::Copy($header, 0, $combined, 0, $header.Length)
+        [Array]::Copy($Bytes, 0, $combined, $header.Length, $Bytes.Length)
+        return [BitConverter]::ToString($sha.ComputeHash($combined)).Replace('-', '').ToLowerInvariant()
+    } finally { $sha.Dispose() }
+}
+
+function Test-DesktopUpdateGitTextConversion {
+    param($Context, [string]$TargetSha, [string]$RelativePath)
+    # Query the approved tree, not the installed .gitattributes. Never execute
+    # filters or guess checkout rules when an older Git lacks --source.
+    try {
+        $result = Invoke-DesktopUpdateGit $Context.Git $Context.Root @(
+            '-c', 'core.quotepath=false', 'check-attr', ('--source=' + $TargetSha),
+            'text', 'eol', 'filter', 'working-tree-encoding', 'ident', '--', $RelativePath
+        ) -AllowFailure
+    } catch { throw "Cannot verify target Git text attributes; update manually: $RelativePath. $($_.Exception.Message)" }
+    if ($result.Code -ne 0) { throw "Cannot verify target Git text attributes; update manually: $RelativePath" }
+    $attributes = @{}
+    $prefix = [Regex]::Escape($RelativePath) + ': '
+    foreach ($line in $result.Lines) {
+        if ($line -cnotmatch ('^' + $prefix + '(text|eol|filter|working-tree-encoding|ident): (.*)$') -or
+            $attributes.ContainsKey($Matches[1])) { throw "Invalid target Git text attributes: $RelativePath" }
+        $attributes[$Matches[1]] = $Matches[2]
+    }
+    if ($attributes.Count -ne 5) { throw "Incomplete target Git text attributes: $RelativePath" }
+    foreach ($name in @('filter', 'working-tree-encoding', 'ident')) {
+        if ($attributes[$name] -notin @('unset', 'unspecified')) { return $false }
+    }
+    if ($attributes['text'] -eq 'unset') { return $false }
+    return $attributes['text'] -in @('set', 'auto') -or $attributes['eol'] -in @('lf', 'crlf')
+}
+
+function Test-DesktopUpdateGitFileBytes {
+    param($Context, [string]$TargetSha, [string]$RelativePath, [string]$Path, [string]$Blob)
+    [byte[]]$bytes = Get-DesktopUpdateFileBytes $Path -Raw
+    if ((Get-DesktopUpdateGitBlobHash $bytes) -ceq $Blob) { return $true }
+    # Codeload may honor eol=crlf even when the committed Git blob is LF.
+    # Exact bytes always win first, including genuine CRLF/-text blobs.
+    [byte[]]$canonical = Get-DesktopUpdateFileBytes $Path
+    if ((Get-DesktopUpdateGitBlobHash $canonical) -cne $Blob) { return $false }
+    return Test-DesktopUpdateGitTextConversion $Context $TargetSha $RelativePath
+}
+
 function Assert-DesktopUpdateGitTree {
     param($Context, [string]$TargetSha, $Plan, [switch]$PathsOnly)
     $files = @{}
@@ -327,16 +376,17 @@ function Assert-DesktopUpdateGitTree {
         if (-not $files.ContainsKey($relative)) { throw "Git tree contains an unowned file: $relative" }
         if ($PathsOnly) { continue }
         $path = Join-Path $Plan.PreparedRoot $relative.Replace('/', '\')
-        [byte[]]$bytes = Get-DesktopUpdateFileBytes $path -Raw
-        $sha = [Security.Cryptography.SHA1]::Create()
-        try {
-            [byte[]]$header = [Text.Encoding]::ASCII.GetBytes(('blob ' + $bytes.Length + [char]0))
-            $combined = New-Object byte[] ($header.Length + $bytes.Length)
-            [Array]::Copy($header, 0, $combined, 0, $header.Length)
-            [Array]::Copy($bytes, 0, $combined, $header.Length, $bytes.Length)
-            $actual = [BitConverter]::ToString($sha.ComputeHash($combined)).Replace('-', '').ToLowerInvariant()
-        } finally { $sha.Dispose() }
-        if ($actual -cne $blob) { throw "Git/archive source mismatch: $relative" }
+        if (-not (Test-DesktopUpdateGitFileBytes $Context $TargetSha $relative $path $blob)) {
+            throw "Git/archive source mismatch: $relative"
+        }
+        if ($relative -ieq 'start_desktop.bat') {
+            # The executing bootstrap is never replaced, even to change CRLF.
+            # Its retained bytes must still represent the target indexed blob.
+            $retained = Assert-DesktopUpdateLocalPath $Context.Root (Join-Path $Context.Root 'start_desktop.bat')
+            if (-not (Test-DesktopUpdateGitFileBytes $Context $TargetSha $relative $retained $blob)) {
+                throw 'Frozen bootstrap bytes are incompatible with the target Git attributes. Install this version manually.'
+            }
+        }
     }
     $attributesPaths = @($Plan.NewManifest.files | Where-Object { [IO.Path]::GetFileName($_.path) -eq '.gitattributes' } | ForEach-Object { Join-Path $Plan.PreparedRoot $_.path.Replace('/', '\') })
     foreach ($attributesPath in $attributesPaths) {
@@ -566,7 +616,7 @@ function Restore-DesktopUpdateTransaction {
             if ($git.ref -cne 'refs/heads/master' -or $git.old -cnotmatch '^[a-f0-9]{40}$' -or $git.headHash -cnotmatch '^[a-f0-9]{64}$' -or
                 $git.indexOldHash -cnotmatch '^[a-f0-9]{64}$' -or $git.indexNewHash -cnotmatch '^[a-f0-9]{64}$' -or
                 $git.lockToken -cnotmatch '^[a-f0-9]{32}$') { throw 'Invalid Git recovery metadata.' }
-            $gitCommand = (Get-Command git.exe -CommandType Application -ErrorAction Stop).Source
+            $gitCommand = (Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
             $index = Assert-DesktopUpdateLocalPath $Paths.Root (Join-Path $Paths.Root '.git/index')
             $head = Assert-DesktopUpdateLocalPath $Paths.Root (Join-Path $Paths.Root '.git/HEAD')
             if ((Get-DesktopUpdateFileHash $head -Raw) -cne $git.headHash) { throw 'Git HEAD changed outside this update; recovery preserved it.' }
@@ -627,7 +677,7 @@ function Assert-DesktopUpdateRetainedState {
     $stateHash = if ($newVersion) { $journal.stateNewHash } else { $journal.stateOldHash }
     if ((Get-DesktopUpdateOptionalHash $state) -cne $stateHash) { throw 'Update state changed before recovery cleanup.' }
     if ($null -ne $journal.git) {
-        $git = (Get-Command git.exe -CommandType Application -ErrorAction Stop).Source
+        $git = (Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
         $ref = (Invoke-DesktopUpdateGit $git $Paths.Root @('rev-parse', 'refs/heads/master')).Lines -join ''
         $expectedRef = if ($newVersion) { $journal.target } else { $journal.git.old }
         $index = Assert-DesktopUpdateLocalPath $Paths.Root (Join-Path $Paths.Root '.git/index')

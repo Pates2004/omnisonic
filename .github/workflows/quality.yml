@@ -51,13 +51,18 @@ jobs:
       - name: Test the batch entry point
         shell: cmd
         run: start_desktop.bat -SelfTest
-      - name: Test source updater, recovery, consent and fresh restart
+      - name: Test source transactions and interrupted recovery
         shell: powershell
-        run: |
-          .\tests\test_desktop_update_runtime.ps1
-          .\tests\test_desktop_updater.ps1
-          .\tests\test_update_launch_completion.ps1
-          .\tests\test_updater_batch.ps1
+        run: .\tests\test_desktop_update_runtime.ps1
+      - name: Test update consent, discovery and fresh restart
+        shell: powershell
+        run: .\tests\test_desktop_updater.ps1
+      - name: Test successful-launch-only update cleanup
+        shell: powershell
+        run: .\tests\test_update_launch_completion.ps1
+      - name: Test update bootstrap crash statuses
+        shell: powershell
+        run: .\tests\test_updater_batch.ps1
       - name: Test startup logic and portable ROCm package installation
         shell: powershell
         run: .\tests\test_launcher.ps1 -Portable

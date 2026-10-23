@@ -244,8 +244,15 @@ Assert-UpdateRejected { Expand-DesktopUpdateEntry ([pscustomobject]@{ Length = 9
 # Real Git objects/index/reference transitions in an owned, unpushed repository.
 # Per-command project identity avoids changing global/system Git configuration.
 $pair = New-UpdateTestPair 'git'
-$gitExe = (Get-Command git.exe -CommandType Application).Source
+$pair.New = New-UpdateTestTree 'git/new' '2.0' @{
+    'start_desktop.bat' = "@echo off`n"; 'app.py' = "new`n"; 'package/new.py' = "addition`n"
+    '.gitattributes' = "*.bat text eol=crlf`nraw-crlf.txt -text`nbinary.txt -text`n"
+    'raw-crlf.txt' = "true raw CRLF`r`n"; 'binary.txt' = "literal LF, no text conversion`n"
+}
+$gitExe = (Get-Command git.exe -CommandType Application | Select-Object -First 1).Source
 Invoke-DesktopUpdateGit $gitExe $pair.Old @('init', '--initial-branch=master', '--quiet') | Out-Null
+Invoke-DesktopUpdateGit $gitExe $pair.Old @('config', 'core.autocrlf', 'false') | Out-Null
+Assert-UpdateTest (((Invoke-DesktopUpdateGit $gitExe $pair.Old @('config', '--local', '--get', 'core.autocrlf')).Lines -join '') -ceq 'false') 'Owned Git fixture fixes only its local line-ending policy'
 Invoke-DesktopUpdateGit $gitExe $pair.Old @('remote', 'add', 'origin', 'https://github.com/Pates2004/omnisonic.git') | Out-Null
 Invoke-DesktopUpdateGit $gitExe $pair.Old @('-c', 'core.autocrlf=false', 'add', '--all') | Out-Null
 Invoke-DesktopUpdateGit $gitExe $pair.Old @('config', 'user.name', 'Patryk (Pates2004)') | Out-Null
@@ -257,11 +264,59 @@ $oldCommit = (Invoke-DesktopUpdateGit $gitExe $pair.Old @('rev-parse', 'HEAD')).
 $indexEnvironment = $env:GIT_INDEX_FILE
 try {
     $env:GIT_INDEX_FILE = Join-Path $fixture 'fixture-target-index'
-    Invoke-DesktopUpdateGit $gitExe $pair.Old @('--work-tree', $pair.New, '-c', 'core.autocrlf=false', 'add', '--all') | Out-Null
+    Invoke-DesktopUpdateGit $gitExe $pair.Old @('--work-tree', $pair.New, '-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false', 'add', '--all') | Out-Null
     $tree = (Invoke-DesktopUpdateGit $gitExe $pair.Old @('write-tree')).Lines -join ''
     $targetCommit = (Invoke-DesktopUpdateGit $gitExe $pair.Old @('commit-tree', $tree, '-p', $oldCommit, '-m', 'Owned update')).Lines -join ''
 } finally { $env:GIT_INDEX_FILE = $indexEnvironment }
+$script:GitCommandDiscoveryCalls = 0
+function Get-Command {
+    [CmdletBinding()]
+    param([Parameter(Position=0)]$Name, $CommandType)
+    if ($Name -ceq 'git.exe') {
+        $script:GitCommandDiscoveryCalls++
+        return @([pscustomobject]@{ Source = $gitExe }, [pscustomobject]@{ Source = (Join-Path $fixture 'unselected-git.exe') })
+    }
+    return Microsoft.PowerShell.Core\Get-Command @PSBoundParameters
+}
 Assert-UpdateTest ($null -ne (Get-DesktopUpdateGitContext $pair.Old -TargetSha $targetCommit)) 'Clean expected-origin master with fetched FF target accepted'
+$gitContext = Get-DesktopUpdateGitContext $pair.Old -TargetSha $targetCommit
+Assert-UpdateTest ($gitContext.Git -ceq $gitExe) 'Multiple discovered Git applications select one exact first executable'
+# GitHub codeload honors target eol=crlf even though the Git blob stores LF.
+# The installed tree has no such attribute yet: querying the target is essential.
+Write-UpdateTestFile (Join-Path $pair.New 'start_desktop.bat') "@echo off`r`n"
+$gitPlan = New-DesktopUpdatePlan $pair.Old $pair.New
+Assert-DesktopUpdateGitTree $gitContext $targetCommit $gitPlan
+Assert-UpdateTest (Test-DesktopUpdateGitTextConversion $gitContext $targetCommit 'start_desktop.bat') 'Approved target attributes permit actual codeload CRLF checkout bytes'
+Assert-UpdateTest (-not (Test-DesktopUpdateGitTextConversion $gitContext $targetCommit 'raw-crlf.txt')) 'True raw CRLF Git blob passes exact verification despite explicit -text'
+Write-UpdateTestFile (Join-Path $pair.New 'binary.txt') "literal LF, no text conversion`r`n"
+Assert-UpdateRejected { Assert-DesktopUpdateGitTree $gitContext $targetCommit $gitPlan } 'Git/archive source mismatch: binary.txt'
+Write-UpdateTestFile (Join-Path $pair.New 'binary.txt') "literal LF, no text conversion`n"
+Write-UpdateTestFile (Join-Path $pair.New 'app.py') "forged content`n"
+Assert-UpdateRejected { Assert-DesktopUpdateGitTree $gitContext $targetCommit $gitPlan } 'Git/archive source mismatch: app.py'
+Write-UpdateTestFile (Join-Path $pair.New 'app.py') "new`n"
+$invokeGitImplementation = ${function:Invoke-DesktopUpdateGit}
+function Invoke-DesktopUpdateGit {
+    param($Git, $Root, $Arguments, [switch]$AllowFailure)
+    if (@($Arguments | Where-Object { $_ -like '--source=*' }).Count) { return [pscustomobject]@{ Code = 129; Lines = @('Unsupported --source') } }
+    return & $invokeGitImplementation $Git $Root $Arguments -AllowFailure:$AllowFailure
+}
+try { Assert-UpdateRejected { Assert-DesktopUpdateGitTree $gitContext $targetCommit $gitPlan } 'Cannot verify target Git text attributes' }
+finally { Set-Item Function:Invoke-DesktopUpdateGit $invokeGitImplementation }
+$noEol = New-UpdateTestTree 'git/no-eol' '2.1' @{
+    'start_desktop.bat' = "@echo off`n"; 'app.py' = "new`n"; 'package/new.py' = "addition`n"
+    '.gitattributes' = "*.bat -text`nraw-crlf.txt -text`nbinary.txt -text`n"
+    'raw-crlf.txt' = "true raw CRLF`r`n"; 'binary.txt' = "literal LF, no text conversion`n"
+}
+$indexEnvironment = $env:GIT_INDEX_FILE
+try {
+    $env:GIT_INDEX_FILE = Join-Path $fixture 'fixture-no-eol-index'
+    Invoke-DesktopUpdateGit $gitExe $pair.Old @('--work-tree', $noEol, '-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false', 'add', '--all') | Out-Null
+    $noEolTree = (Invoke-DesktopUpdateGit $gitExe $pair.Old @('write-tree')).Lines -join ''
+    $noEolCommit = (Invoke-DesktopUpdateGit $gitExe $pair.Old @('commit-tree', $noEolTree, '-p', $oldCommit, '-m', 'Owned incompatible bootstrap attributes')).Lines -join ''
+} finally { $env:GIT_INDEX_FILE = $indexEnvironment }
+$noEolPlan = New-DesktopUpdatePlan $pair.Old $noEol
+Assert-UpdateRejected { Assert-DesktopUpdateGitTree $gitContext $noEolCommit $noEolPlan } 'Frozen bootstrap bytes are incompatible'
+Assert-UpdateTest (((Invoke-DesktopUpdateGit $gitExe $pair.Old @('rev-parse', 'HEAD')).Lines -join '') -ceq $oldCommit) 'Incompatible target checkout rules refuse before source/index/reference changes'
 Write-UpdateTestFile (Join-Path $pair.Old '.git/info/attributes') 'update_manifest.json filter=must-not-run'
 Assert-UpdateRejected { Get-DesktopUpdateGitContext $pair.Old } 'content transformations'
 [IO.File]::Delete((Join-Path $pair.Old '.git/info/attributes'))
@@ -275,11 +330,15 @@ Assert-UpdateRejected { Get-DesktopUpdateGitContext $pair.Old } 'Custom Git hook
 [IO.File]::Delete((Join-Path $pair.Old '.git/hooks/post-merge'))
 Assert-UpdateTest (Complete-DesktopUpdateAfterLaunch $pair.Old) 'Git cleanup tolerates semantic-only stat-cache index refresh'
 
-$third = New-UpdateTestTree 'git/third' '3.0' @{ 'start_desktop.bat' = "@echo off`n"; 'app.py' = "third`n"; 'package/new.py' = "addition`n" }
+$third = New-UpdateTestTree 'git/third' '3.0' @{
+    'start_desktop.bat' = "@echo off`n"; 'app.py' = "third`n"; 'package/new.py' = "addition`n"
+    '.gitattributes' = "*.bat text eol=crlf`nraw-crlf.txt -text`nbinary.txt -text`n"
+    'raw-crlf.txt' = "true raw CRLF`r`n"; 'binary.txt' = "literal LF, no text conversion`n"
+}
 $indexEnvironment = $env:GIT_INDEX_FILE
 try {
     $env:GIT_INDEX_FILE = Join-Path $fixture 'fixture-third-index'
-    Invoke-DesktopUpdateGit $gitExe $pair.Old @('--work-tree', $third, '-c', 'core.autocrlf=false', 'add', '--all') | Out-Null
+    Invoke-DesktopUpdateGit $gitExe $pair.Old @('--work-tree', $third, '-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false', 'add', '--all') | Out-Null
     $tree = (Invoke-DesktopUpdateGit $gitExe $pair.Old @('write-tree')).Lines -join ''
     $thirdCommit = (Invoke-DesktopUpdateGit $gitExe $pair.Old @('commit-tree', $tree, '-p', $targetCommit, '-m', 'Owned third version')).Lines -join ''
 } finally { $env:GIT_INDEX_FILE = $indexEnvironment }
@@ -296,6 +355,8 @@ Assert-UpdateTest ([IO.File]::ReadAllText((Join-Path $pair.Old 'app.py')) -ceq "
 Assert-UpdateTest (Complete-DesktopUpdateAfterLaunch $pair.Old) 'Confirmed restored Git version releases its recovery-only copies'
 Write-UpdateTestFile (Join-Path $pair.Old 'app.py') 'user change'
 Assert-UpdateRejected { Get-DesktopUpdateGitContext $pair.Old } 'Local Git changes'
+Assert-UpdateTest ($script:GitCommandDiscoveryCalls -ge 3) 'Multiple-match Git discovery also covers real activation, recovery and cleanup'
+Remove-Item Function:Get-Command
 
 # The copied recovery module executes in a new Windows PowerShell process even
 # if the live updater has already been removed or is partially replaced.
