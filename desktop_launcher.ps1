@@ -1923,6 +1923,17 @@ function Invoke-LauncherSession {
     $env:OMNISONIC_APP_DIR = $ProjectRoot
     $env:OMNISONIC_ACTIVE_BACKEND = $selectedBackend
     Start-DesktopGui -Python $python -HideConsole $hideConsole
+    $updateCore = Join-Path $ProjectRoot 'desktop_update_runtime.ps1'
+    $updatePending = Join-Path $ProjectRoot '.launcher\update-recovery\pending.json'
+    if ((Test-Path -LiteralPath $updatePending) -and (Test-Path -LiteralPath $updateCore)) {
+        try {
+            . $updateCore -ProjectRoot $ProjectRoot
+            Complete-DesktopUpdateAfterLaunch -ProjectRoot $ProjectRoot -LockHeld | Out-Null
+        }
+        catch {
+            Write-WarningMessage "OmniSonic started, but source-update recovery cleanup could not finish. Recovery files were retained. / Program wystartowal, ale pliki odzyskiwania aktualizacji pozostaly do sprawdzenia. $($_.Exception.Message)"
+        }
+    }
 }
 
 function Invoke-Main {

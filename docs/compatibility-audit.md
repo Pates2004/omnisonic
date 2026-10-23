@@ -4,8 +4,11 @@
 
 Compared both projects against the upstream default-branch commit
 [`08be0b4ccbac3e13e374e86fbfead4b4cac343e2`](https://github.com/k2-fsa/OmniVoice/commit/08be0b4ccbac3e13e374e86fbfead4b4cac343e2)
-(2026-08-24), current at the audit date. Its functionality is present, including
-the denoiser waveform fix. Local differences preserve CPU-aware dtype/SDPA,
+(2026-08-24), still current at the 2026-10-23 recheck. Its inference functionality
+is present. The earlier claim that its single-waveform denoiser fix was already
+included was incorrect: that omitted batch-axis fix was identified and applied
+on 2026-10-23, with six lightweight regressions and a real Torch CPU check.
+Local differences preserve CPU-aware dtype/SDPA,
 validation, warning handling and previous code-quality fixes. Formatting was
 excluded from the semantic comparison.
 

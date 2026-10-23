@@ -11,6 +11,21 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem Recover an interrupted transaction before loading possibly mixed live source.
+if exist ".launcher\update-recovery\recover.ps1" (
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ".\.launcher\update-recovery\recover.ps1" -Recover
+    if not errorlevel 0 goto updater_failed
+    if errorlevel 1 goto updater_failed
+)
+
+if exist "desktop_updater.ps1" (
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ".\desktop_updater.ps1" %*
+    if not errorlevel 0 goto updater_failed
+    if errorlevel 20 goto updater_failed
+    if errorlevel 10 exit /b 0
+    if errorlevel 1 goto updater_failed
+)
+
 if not exist "desktop_launcher.ps1" (
     echo [ERROR] Missing desktop_launcher.ps1.
     echo [ERROR] Brakuje pliku desktop_launcher.ps1.
@@ -39,3 +54,9 @@ if not "%LAUNCHER_EXIT%"=="0" (
 )
 
 exit /b %LAUNCHER_EXIT%
+
+:updater_failed
+echo [ERROR] The source update or recovery could not finish. Recovery files were retained in .launcher\update-recovery.
+echo [ERROR] Nie zakonczono aktualizacji lub odzyskiwania. Pliki do wycofania zmian pozostaly w .launcher\update-recovery.
+pause
+exit /b 1

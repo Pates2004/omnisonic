@@ -592,7 +592,7 @@ class DesktopSourceTests(unittest.TestCase):
             with self.subTest(extension=extension):
                 self.assertIn(extension, wildcard)
 
-    def test_clone_tab_has_no_preset_delete_binding(self):
+    def test_clone_tab_binds_its_own_selected_preset_delete_handler(self):
         _source, tree = self._app_tree()
         frame = next(
             node
@@ -614,6 +614,8 @@ class DesktopSourceTests(unittest.TestCase):
         self.assertNotIn("OnDelPreset", called_handlers)
         self.assertNotIn("OnDelAllPresets", called_handlers)
         self.assertNotIn("OnPresetManagerKeyDown", called_handlers)
+        self.assertIn("OnClonePresetKeyDown", called_handlers)
+        self.assertIn("OnSavePresetPrompt", called_handlers)
 
     def test_gui_forwards_every_generation_config_field(self):
         _source, tree = self._app_tree()

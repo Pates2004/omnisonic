@@ -36,6 +36,10 @@ Assert-Test ($SwitchData -eq (Join-Path $SwitchRoot 'config')) 'Power Switch use
     $commandLine = '"C:\synthetic-app\venv\Scripts\omnisonic.exe"'
     Assert-Rejected { Assert-SwitchAppClosed } 'Close OmniSonic'
 }
+# All remaining transfers target synthetic installations. The guard contracts
+# above already exercise matching/nonmatching processes; an unrelated real app
+# on the developer's machine must not invalidate these isolated fixtures.
+function Get-CimInstance { return @() }
 $fixture = Join-ProjectMaterialPath $SwitchRoot ('trash\power-switch-tests-' + [Guid]::NewGuid().ToString('N'))
 $SwitchRoot = Join-Path $fixture 'old-pc'
 $SwitchData = Join-Path $SwitchRoot 'config'

@@ -249,8 +249,6 @@
     "record_empty": "Mikrofon nie zarejestrował żadnych próbek. Sprawdź wybrane urządzenie wejściowe i spróbuj ponownie.",
     "preset_manager_list": "Presety głosu:",
     "btn_edit_preset": "Edytuj preset",
-    "preset_source_audio": "Źródłowy plik audio nowego presetu:",
-    "preset_source_ref_text": "Tekst źródłowego nagrania (opcjonalny; pusty oznacza automatyczną transkrypcję):",
     "preset_edit_title": "Edytuj preset",
     "preset_edit_name": "Nazwa presetu:",
     "preset_edit_source": "Nowy źródłowy plik audio (opcjonalny; pozostaw puste, aby zachować obecny głos):",
@@ -364,5 +362,11 @@
     "voice_attributes_help_title": "Znaczniki cech głosu",
     "voice_attributes_help_body": "OmniVoice przyjmuje obsługiwane znaczniki cech wymienione poniżej, oddzielone przecinkami. Przykład: female, young adult, whisper. Swobodne opisy, takie jak 'spokojny lektor', nie są obsługiwane. Używaj tylko jednej wartości z każdej kategorii. Nie łącz sprzecznych wartości, takich jak male i female. Wybory z list i dodatkowe znaczniki są łączone. Wymagana jest angielska lub chińska pisownia znaczników, również przy polskim interfejsie.\n\n{tags}",
     "voice_instruction_invalid": "Nieobsługiwane lub sprzeczne znaczniki cech głosu. Zobacz Pomoc > Znaczniki cech głosu.\n\n{error}",
-    "voice_instruction_not_ready": "Sprawdzanie cech głosu jest niedostępne. Uruchom OmniSonic ponownie, aby wczytać biblioteki AI."
+    "voice_instruction_not_ready": "Sprawdzanie cech głosu jest niedostępne. Uruchom OmniSonic ponownie, aby wczytać biblioteki AI.",
+    "update_title": "Aktualizacja OmniSonic",
+    "update_offer": "Dostępna jest przetestowana aktualizacja OmniSonic: {0} ({1}, {2}). Zainstalowana wersja: {5}.\n\nOstatnie zmiany (do 10):\n{4}\n\nPobrać aktualizację i uruchomić ponownie? Ustawienia, presety, zapisane audio i środowiska Pythona zostaną zachowane. Poprzednie pliki programu pozostaną tylko do poprawnego uruchomienia nowej wersji.",
+    "update_downloading": "Pobieranie zweryfikowanej aktualizacji źródeł OmniSonic...",
+    "update_unavailable": "Nie zastosowano aktualizacji; używana jest obecna instalacja. Szczegóły: {0}",
+    "update_restart_failed": "Nowe pliki programu są zainstalowane, ale nie udało się ponownie uruchomić launchera. Uruchom OmniSonic ponownie; pliki odzyskiwania zostały zachowane. Szczegóły: {0}",
+    "update_recovery_required": "Przed uruchomieniem OmniSonic trzeba zakończyć odzyskiwanie aktualizacji. Pliki odzyskiwania: {0}. Szczegóły: {1}"
 }

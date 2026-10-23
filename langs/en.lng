@@ -249,8 +249,6 @@
     "record_empty": "No microphone samples were captured. Check the selected input device and try again.",
     "preset_manager_list": "Voice presets:",
     "btn_edit_preset": "Edit preset",
-    "preset_source_audio": "Source audio file for the new preset:",
-    "preset_source_ref_text": "Reference transcript (optional; leave empty for automatic transcription):",
     "preset_edit_title": "Edit preset",
     "preset_edit_name": "Preset name:",
     "preset_edit_source": "New source audio file (optional; leave empty to keep the current voice):",
@@ -364,5 +362,11 @@
     "voice_attributes_help_title": "Voice attribute tags",
     "voice_attributes_help_body": "OmniVoice accepts the supported attribute tags listed below, separated by commas. Example: female, young adult, whisper. Free-form descriptions such as 'calm narrator' are not supported. Use only one value from each category. Do not combine conflicting values such as male and female. Dropdown selections and additional tags are combined. The English/Chinese tag spelling is required even when the interface is translated.\n\n{tags}",
     "voice_instruction_invalid": "Unsupported or conflicting voice attribute tags. See Help > Voice attribute tags.\n\n{error}",
-    "voice_instruction_not_ready": "Voice attribute validation is unavailable. Restart OmniSonic to load its AI libraries."
+    "voice_instruction_not_ready": "Voice attribute validation is unavailable. Restart OmniSonic to load its AI libraries.",
+    "update_title": "OmniSonic update",
+    "update_offer": "A tested OmniSonic update is available: {0} ({1}, {2}). Installed: {5}.\n\nRecent changes (up to 10):\n{4}\n\nDownload and restart? Settings, presets, saved audio and Python environments will be preserved. Previous source files are kept only until the new application starts successfully.",
+    "update_downloading": "Downloading the verified OmniSonic source update...",
+    "update_unavailable": "Update not applied; using the current installation. Details: {0}",
+    "update_restart_failed": "The updated source is installed, but the launcher could not restart. Start OmniSonic again; recovery files have been retained. Details: {0}",
+    "update_recovery_required": "Source update recovery must finish before OmniSonic can start. Recovery files: {0}. Details: {1}"
 }

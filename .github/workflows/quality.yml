@@ -19,11 +19,15 @@ jobs:
       - name: Install quality tools
         run: python -m pip install "ruff>=0.11" "pytest>=8" numpy soundfile pydub "num2words>=0.5.14"
       - name: Lint Python code
-        run: ruff check omnivoice omnisonic tests wx_app.py installer_runtime.py
+        run: ruff check omnivoice omnisonic tests wx_app.py installer_runtime.py tools/update_manifest.py
       - name: Check formatting
-        run: ruff format --check omnivoice omnisonic tests wx_app.py installer_runtime.py
+        run: ruff format --check omnivoice omnisonic tests wx_app.py installer_runtime.py tools/update_manifest.py
       - name: Compile Python sources
-        run: python -m compileall -q omnisonic omnivoice tests wx_app.py installer_runtime.py
+        run: python -m compileall -q omnisonic omnivoice tests tools wx_app.py installer_runtime.py
+      - name: Verify maintained source manifest
+        run: python -B tools/update_manifest.py --check
+      - name: Test Clone preset controls and single-waveform denoising
+        run: python -m unittest -v tests.test_clone_preset_ui tests.test_denoise_processor tests.test_update_manifest
       - name: Test desktop logic
         run: python -m unittest -v tests.test_desktop_logic tests.test_runtime_requirements tests.test_batch tests.test_reference_audio tests.test_model_lifecycle tests.test_operation_dispatch tests.test_preset_selection tests.test_preset_file_safety tests.test_playback tests.test_numeric_controls tests.test_ui_preferences tests.test_normalization_ui tests.test_generation_inputs tests.test_text_normalization tests.test_inference_validation tests.test_demo_reference tests.test_file_safety tests.test_startup
       - name: Test transactional runtime entry-point repair
@@ -47,6 +51,13 @@ jobs:
       - name: Test the batch entry point
         shell: cmd
         run: start_desktop.bat -SelfTest
+      - name: Test source updater, recovery, consent and fresh restart
+        shell: powershell
+        run: |
+          .\tests\test_desktop_update_runtime.ps1
+          .\tests\test_desktop_updater.ps1
+          .\tests\test_update_launch_completion.ps1
+          .\tests\test_updater_batch.ps1
       - name: Test startup logic and portable ROCm package installation
         shell: powershell
         run: .\tests\test_launcher.ps1 -Portable

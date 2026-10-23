@@ -153,7 +153,7 @@ class WxPreferenceEdgeTests(unittest.TestCase):
             editor.Destroy()
             self.application.Yield()
 
-    def test_managed_source_change_invalidates_the_previous_reference_text(self):
+    def test_preset_manager_retains_edit_and_delete_without_separate_save_source(self):
         frame = self.wx.Frame(None)
         panel = self.wx.Panel(frame)
         view = SimpleNamespace(_=lambda key: key)
@@ -163,21 +163,19 @@ class WxPreferenceEdgeTests(unittest.TestCase):
             "RefreshPresets",
             "OnDelPreset",
             "OnDelAllPresets",
-            "BrowseFor",
-            "OnSaveManagedPreset",
         ):
             setattr(view, name, Mock())
-        view.OnPresetSourceChanged = lambda event: (
-            self.desktop.OmniVoiceFrame.OnPresetSourceChanged(view, event)
-        )
         try:
             self.desktop.OmniVoiceFrame.SetupPresetsTab(view, panel)
-            view.preset_source_audio.SetValue("synthetic-first.wav")
-            view.preset_source_ref_text.SetValue("Transcript of first source")
-            view.preset_source_audio.SetValue("synthetic-second.wav")
-            self.application.Yield()
-            self.assertEqual(view.preset_source_ref_text.GetValue(), "")
-            self.assertEqual(view.preset_source_ref_text.GetName(), "preset_source_ref_text")
+            self.assertEqual(view.list_presets.GetName(), "preset_manager_list")
+            for name in (
+                "btn_edit_preset",
+                "btn_del_preset_manager",
+                "btn_del_all_presets_manager",
+            ):
+                self.assertIs(getattr(view, name).GetParent(), panel)
+            for name in ("preset_source_audio", "preset_source_ref_text", "btn_save_preset"):
+                self.assertFalse(hasattr(view, name))
         finally:
             frame.Destroy()
             self.application.Yield()

@@ -13,12 +13,49 @@ microphone recording, reusable private presets, and Polish/English interfaces.
 - automatic and attribute-based voice design, including supported Chinese
   dialects and additional voice instructions;
 - pause, resume, stop, recording, manual save, and configurable auto-save;
-- a dedicated preset manager with create, rename, rebuild, and delete actions;
+- preset creation in Clone and a dedicated manager for rename, rebuild and delete;
 - portable voice presets stored in the application's ignored `presets/` directory;
 - full access to OmniVoice's generation and long-form audio parameters;
 - optional fixed random seeds and in-memory reuse of an unchanged voice reference;
 - lazy ASR loading to reduce startup time and memory use;
 - Polish and English localization.
+
+## Aktualizacje / Updates
+
+`start_desktop.bat` checks the official GitHub `master` before opening the app.
+An update is offered only when the latest push workflow for that exact commit
+has passed **Quality checks**. The confirmation shows the version, revision,
+date and up to ten recent commit summaries. **No** is the default. Declining,
+being offline, a pending/failed CI run or a GitHub API limit keeps the current
+installation usable; no update is installed silently.
+
+Accepting downloads the immutable source revision, verifies the maintained-file
+manifest and stages a transactional source update. Settings, presets, saved audio,
+models, Python environments and the separate Local Launcher directory are never
+replaced. Close any running OmniSonic instance first: the updater does not kill
+generation or discard an unsaved recording. After installation a fresh launcher
+process starts with the original arguments; changed dependencies go through the
+normal runtime validation/repair. Only the previous source files needed for the
+current rollback are retained. A successful new application start removes that
+backup and the verified download staging; a failed/interrupted update retains
+recovery data and checks it before executing the live launcher next time.
+
+Po polsku: przy starcie pojawi się pytanie o nową wersję z zielonymi testami,
+z numerem wersji, rewizją, datą i listą ostatnich zmian. **Nie** jest domyślne.
+Odmowa lub brak sieci nie blokują obecnej wersji. Aktualizowane są tylko pliki
+programu, nie konfiguracja, presety, audio, modele ani Python. Najpierw zamknij
+działające okna aplikacji. Po aktualizacji program uruchamia się ponownie;
+kopia poprzednich źródeł i pliki pobierania są usuwane dopiero po udanym starcie.
+
+ZIP installations need the shipped `update_manifest.json`; old packages without
+it need one manual download of this version. Git checkouts must be clean, on
+`master`, with the official origin and no custom hooks/filters or redirected Git
+state. Local changes and unknown-file collisions are preserved and prevent an
+automatic update. An update that changes the small bootstrap BAT itself requires
+a manual new package, so a currently executing command script is never replaced.
+To skip update checks for one session, set `OMNISONIC_SKIP_UPDATE=1` in that
+session's environment. Maintenance commands such as `-SelfTest` and `-InstallOnly`
+do not contact GitHub. Details and recovery: [source updates](docs/updates.md).
 
 ## Powtarzalność generacji / Generation repeatability
 
@@ -471,12 +508,21 @@ Voice presets contain derived voice tokens and may contain a reference
 transcript. Treat them as private data. The complete `presets/` tree is ignored
 by Git.
 
-The **Voice Presets** tab is the only place where presets can be removed. Delete
-shows the configured warning, while Shift+Delete removes the selected preset
-without that warning. Editing can rename a preset, update its transcript, or
+The **Voice Clone** tab has **Save preset**, using its loaded reference audio
+and transcript and asking for a name, just like **Ctrl+Shift+S**. The **Voice
+Presets** tab retains its list, refresh, edit, delete and delete-all actions.
+Delete works on either preset list and shows the configured warning;
+Shift+Delete removes the selected preset without that warning. The new-file
+entry in Clone is never deleted. Preset changes are blocked during generation,
+recording or an unsaved microphone take. Editing can rename a preset, update its transcript, or
 rebuild its voice data from a new source recording. The original audio path is
 not embedded in a preset, so choosing a replacement file during editing is
 optional.
+
+Po polsku: **Zapisz preset** jest w **Klonowaniu** i korzysta z bieżącego pliku
+referencyjnego oraz jego tekstu. Delete i Shift+Delete działają także na liście
+w tej zakładce; pozycja „Brak — użyj nowego pliku” jest pomijana. Zakładka
+**Presety** nadal służy do zarządzania, edycji i usuwania wszystkich presetów.
 
 Choosing replacement audio in the preset editor clears the previous transcript;
 enter the new recording's text or leave it blank for Whisper. Clearing the

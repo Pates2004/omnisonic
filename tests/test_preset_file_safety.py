@@ -94,7 +94,15 @@ class PresetFileSafetyTests(unittest.TestCase):
             _set_operation_controls_enabled=Mock(),
             _=lambda key: key,
         )
-        for name in ("RefreshPresets", "_SelectedManagedPreset", "OnDelPreset", "OnDelAllPresets"):
+        for name in (
+            "RefreshPresets",
+            "_SelectedPreset",
+            "_SelectedManagedPreset",
+            "_CanModifyPresets",
+            "_DeletePreset",
+            "OnDelPreset",
+            "OnDelAllPresets",
+        ):
             handler = load_handler(name, self.namespace)
             setattr(self.frame, name, handler.__get__(self.frame))
 
@@ -259,7 +267,7 @@ class PresetFileSafetyTests(unittest.TestCase):
         source = self.file("synthetic-reference.wav")
         preset = self.file("Selected.pt")
         for method in (
-            "_SelectedManagedPreset",
+            "_SelectedPreset",
             "_PromptAndSavePreset",
             "OnEditPreset",
             "OnGenClone",
@@ -307,9 +315,11 @@ class PresetFileSafetyTests(unittest.TestCase):
                     (str(source), None)
                     if method == "_PromptAndSavePreset"
                     else ()
-                    if method == "_SelectedManagedPreset"
+                    if method == "_SelectedPreset"
                     else (None,)
                 )
+                if method == "_SelectedPreset":
+                    arguments = (frame.list_presets,)
                 handler(frame, *arguments)
                 self.wx.MessageBox.assert_called_once()
                 frame.RunModelOperation.assert_not_called()
@@ -357,6 +367,7 @@ class PresetRenameTests(unittest.TestCase):
         self.frame = SimpleNamespace(
             _=lambda key: key,
             _CanUseModel=Mock(return_value=True),
+            _CanModifyPresets=Mock(return_value=True),
             _PresetSaved=Mock(),
         )
         for name in (
