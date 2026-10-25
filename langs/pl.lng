@@ -363,6 +363,8 @@
     "voice_attributes_help_body": "OmniVoice przyjmuje obsługiwane znaczniki cech wymienione poniżej, oddzielone przecinkami. Przykład: female, young adult, whisper. Swobodne opisy, takie jak 'spokojny lektor', nie są obsługiwane. Używaj tylko jednej wartości z każdej kategorii. Nie łącz sprzecznych wartości, takich jak male i female. Wybory z list i dodatkowe znaczniki są łączone. Wymagana jest angielska lub chińska pisownia znaczników, również przy polskim interfejsie.\n\n{tags}",
     "voice_instruction_invalid": "Nieobsługiwane lub sprzeczne znaczniki cech głosu. Zobacz Pomoc > Znaczniki cech głosu.\n\n{error}",
     "voice_instruction_not_ready": "Sprawdzanie cech głosu jest niedostępne. Uruchom OmniSonic ponownie, aby wczytać biblioteki AI.",
+    "preset_source_audio": "Plik źródłowy audio nowego presetu:",
+    "preset_source_ref_text": "Tekst nagrania referencyjnego:",
     "update_title": "Aktualizacja OmniSonic",
     "update_offer": "Dostępna jest przetestowana aktualizacja OmniSonic: {0} ({1}, {2}). Zainstalowana wersja: {5}.\n\nOstatnie zmiany (do 10):\n{4}\n\nPobrać aktualizację i uruchomić ponownie? Ustawienia, presety, zapisane audio i środowiska Pythona zostaną zachowane. Poprzednie pliki programu pozostaną tylko do poprawnego uruchomienia nowej wersji.",
     "update_downloading": "Pobieranie zweryfikowanej aktualizacji źródeł OmniSonic...",

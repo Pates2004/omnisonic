@@ -63,6 +63,11 @@ usable and reports the retained recovery path. Preserve that folder when
 reporting an interrupted update. Do not manually delete an unknown recovery
 folder or run a guessed hard reset. Existing user data and runtime backups are
 separate and are not cleaned by the source updater.
+A launch beginning with first-run configuration retains its rollback copy until
+the next successful start from an already configured profile. The configured
+state is captured before opening the GUI, so accepting Settings during that
+launch cannot accidentally count as main-window initialization. This does not
+claim whole-process or model-health monitoring after the normal startup handshake.
 A failure while preparing backups, before any source writes or recovery pointer,
 can retain incomplete diagnostic files. The current application remains usable;
 another update refuses that nonempty recovery area and reports its exact path

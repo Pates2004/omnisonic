@@ -82,6 +82,22 @@ function Get-SettingsPath {
     return Join-Path $ProjectRoot "config\settings.json"
 }
 
+function Test-DesktopProfileConfigured {
+    param([string]$ProjectRoot)
+    try {
+        $settingsPath = Join-Path $ProjectRoot 'config\settings.json'
+        if (-not (Test-Path -LiteralPath $settingsPath -PathType Leaf)) { return $false }
+        $utf8 = New-Object Text.UTF8Encoding($false, $true)
+        $json = $utf8.GetString([IO.File]::ReadAllBytes($settingsPath))
+        if ($json.Length -gt 0 -and $json[0] -eq [char]0xFEFF) { $json = $json.Substring(1) }
+        $settings = $json | ConvertFrom-Json -ErrorAction Stop
+        $configured = $settings.PSObject.Properties['first_run_done']
+        return $null -ne $configured -and $configured.Name -ceq 'first_run_done' -and
+            $configured.Value -is [bool] -and $configured.Value
+    }
+    catch { return $false }
+}
+
 function Get-PreferenceSettingsPath {
     $settingsPath = Get-SettingsPath
     if (Test-Path -LiteralPath $settingsPath) { return $settingsPath }
@@ -206,7 +222,7 @@ function Start-DesktopGui {
                     if (-not (Get-Process -Id ([int]$desktopProcessId) -ErrorAction SilentlyContinue)) {
                         throw "OmniSonic stopped immediately after showing its window. Log: $($script:LastStartupLog)"
                     }
-                    Write-Step "OmniSonic opened successfully. Startup log: $($script:LastStartupLog)"
+                    Write-Step "OmniSonic startup window detected; runtime/model loading may still be in progress. / Wykryto okno startowe OmniSonic; inicjalizacja lub model moga nadal sie ladowac. Log: $($script:LastStartupLog)"
                     return
                 }
             }
@@ -1922,10 +1938,20 @@ function Invoke-LauncherSession {
     Write-Step "Starting OmniSonic with $($profile.display_name)"
     $env:OMNISONIC_APP_DIR = $ProjectRoot
     $env:OMNISONIC_ACTIVE_BACKEND = $selectedBackend
-    Start-DesktopGui -Python $python -HideConsole $hideConsole
     $updateCore = Join-Path $ProjectRoot 'desktop_update_runtime.ps1'
     $updatePending = Join-Path $ProjectRoot '.launcher\update-recovery\pending.json'
+    $updateStartedConfigured = $false
+    if (Test-Path -LiteralPath $updatePending) {
+        # The first settings dialog can publish window readiness before runtime
+        # imports. Capture the prior profile, not a setting saved during startup.
+        $updateStartedConfigured = Test-DesktopProfileConfigured -ProjectRoot $ProjectRoot
+    }
+    Start-DesktopGui -Python $python -HideConsole $hideConsole
     if ((Test-Path -LiteralPath $updatePending) -and (Test-Path -LiteralPath $updateCore)) {
+        if (-not $updateStartedConfigured) {
+            Write-WarningMessage "Previous source backup retained until the next configured start; the first settings window is not full startup confirmation. / Kopia poprzednich zrodel pozostaje do nastepnego uruchomienia po konfiguracji; samo okno pierwszych ustawien nie potwierdza pelnego startu."
+            return
+        }
         try {
             . $updateCore -ProjectRoot $ProjectRoot
             Complete-DesktopUpdateAfterLaunch -ProjectRoot $ProjectRoot -LockHeld | Out-Null

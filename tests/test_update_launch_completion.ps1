@@ -14,10 +14,51 @@ $sessions = @($tree.FindAll({
 }, $true))
 if ($sessions.Count -ne 1) { throw 'Expected exactly one real launcher session function.' }
 $sessionDefinition = [ScriptBlock]::Create($sessions[0].Extent.Text)
+$profileHelpers = @($tree.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Test-DesktopProfileConfigured'
+}, $true))
+if ($profileHelpers.Count -ne 1) { throw 'Expected exactly one profile configuration helper.' }
+$profileDefinition = [ScriptBlock]::Create($profileHelpers[0].Extent.Text)
 
 function Assert-UpdateLaunch {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw "Update launch completion regression: $Message" }
+}
+
+& {
+    # Validate the real read-only helper against owned config files, never the
+    # developer's current profile or a migrated user-profile settings location.
+    . $profileDefinition
+    $profileFixture = Join-ProjectMaterialPath $testProject (
+        'Trash\update-launch-completion-profiles-' + [Guid]::NewGuid().ToString('N')
+    )
+    $profileFixture = Assert-ProjectTestPath $profileFixture $testProject
+    [IO.Directory]::CreateDirectory((Join-Path $profileFixture 'config')) | Out-Null
+    $settingsFile = Join-Path $profileFixture 'config\settings.json'
+    Assert-UpdateLaunch (-not (Test-DesktopProfileConfigured $profileFixture)) 'Missing owned profile is not configured'
+    foreach ($case in @(
+        @{Json='{}';Configured=$false},
+        @{Json='{"first_run_done":false}';Configured=$false},
+        @{Json='{"first_run_done":"true"}';Configured=$false},
+        @{Json='{"first_run_done":1}';Configured=$false},
+        @{Json='{"first_run_done":null}';Configured=$false},
+        @{Json='{"first_run_done":{}}';Configured=$false},
+        @{Json='true';Configured=$false},
+        @{Json='[]';Configured=$false},
+        @{Json='{"FIRST_RUN_DONE":true}';Configured=$false},
+        @{Json='{"first_run_done":';Configured=$false},
+        @{Json='{"first_run_done":true}';Configured=$true}
+    )) {
+        [IO.File]::WriteAllText($settingsFile, $case.Json, (New-Object Text.UTF8Encoding($false)))
+        Assert-UpdateLaunch ((Test-DesktopProfileConfigured $profileFixture) -eq $case.Configured) ('Strict boolean profile readiness: ' + $case.Json)
+        Assert-UpdateLaunch ([IO.File]::ReadAllText($settingsFile) -ceq $case.Json) 'Profile readiness never modifies the settings file'
+    }
+    [IO.File]::WriteAllText($settingsFile, '{"first_run_done":true}', (New-Object Text.UTF8Encoding($true)))
+    Assert-UpdateLaunch (Test-DesktopProfileConfigured $profileFixture) 'UTF-8 BOM profile is supported'
+    [IO.File]::WriteAllBytes($settingsFile, [byte[]]@(0xFF, 0x7B, 0x7D))
+    Assert-UpdateLaunch (-not (Test-DesktopProfileConfigured $profileFixture)) 'Invalid UTF-8 is conservatively unconfigured'
 }
 
 # Load only the actual function being exercised. All runtime, hardware and GUI
@@ -46,7 +87,7 @@ try {
     foreach ($scenario in @(
         'pending-visible', 'pending-hidden', 'no-pending', 'no-core',
         'gui-failure', 'runtime-failure', 'install-only', 'bootstrap-only',
-        'website-mode', 'cleanup-failure', 'core-import-failure'
+        'website-mode', 'cleanup-failure', 'core-import-failure', 'first-run-then-configured'
     )) {
         try {
             & {
@@ -65,6 +106,8 @@ try {
                     LockHeld = $false
                     StartReturned = $false
                     HideConsole = $null
+                    ProfileConfigured = $scenario -ne 'first-run-then-configured'
+                    ProfileReadCount = 0
                     FailCleanup = $scenario -eq 'cleanup-failure'
                     FailCoreImport = $scenario -eq 'core-import-failure'
                 }
@@ -142,6 +185,12 @@ try {
                     param([string]$Message)
                     $state.Warnings.Add($Message)
                 }
+                function Test-DesktopProfileConfigured {
+                    param([string]$ProjectRoot)
+                    Assert-UpdateLaunch ($ProjectRoot -eq $fixture) 'Profile readiness reads only the owned project'
+                    $state.ProfileReadCount++
+                    return $state.ProfileConfigured
+                }
                 function Start-DesktopGui {
                     param([string]$Python, [bool]$HideConsole)
                     $state.Events.Add('gui-start')
@@ -151,6 +200,7 @@ try {
                     Assert-UpdateLaunch ($env:OMNISONIC_APP_DIR -eq $fixture) 'Application directory is synthetic'
                     Assert-UpdateLaunch ($env:OMNISONIC_ACTIVE_BACKEND -eq 'cpu') 'Selected backend reaches GUI'
                     if ($scenario -eq 'gui-failure') { throw 'EXPECTED_GUI_START_FAILURE' }
+                    if ($scenario -eq 'first-run-then-configured') { $state.ProfileConfigured = $true }
                     $state.StartReturned = $true
                     $state.Events.Add('gui-success')
                 }
@@ -176,7 +226,9 @@ try {
                 }
                 $skipsGui = $scenario -in @('runtime-failure', 'install-only', 'bootstrap-only', 'website-mode')
                 Assert-UpdateLaunch ($state.StartCount -eq $(if ($skipsGui) { 0 } else { 1 })) "$scenario GUI dispatch count"
-                if ($scenario -in @('install-only', 'bootstrap-only', 'website-mode', 'gui-failure', 'runtime-failure', 'no-core', 'no-pending')) {
+                $readsProfile = -not $skipsGui -and $scenario -ne 'no-pending'
+                Assert-UpdateLaunch ($state.ProfileReadCount -eq $(if ($readsProfile) { 1 } else { 0 })) "$scenario captures the profile only before a pending-update GUI launch"
+                if ($scenario -in @('install-only', 'bootstrap-only', 'website-mode', 'gui-failure', 'runtime-failure', 'no-core', 'no-pending', 'first-run-then-configured')) {
                     Assert-UpdateLaunch (-not $state.Events.Contains('core-import')) "$scenario never imports cleanup core"
                 }
                 if ($scenario -in @('cleanup-failure', 'core-import-failure')) {
@@ -184,6 +236,9 @@ try {
                     $marker = if ($scenario -eq 'cleanup-failure') { 'EXPECTED_COMPLETION_CLEANUP_FAILURE' } else { 'EXPECTED_CORE_IMPORT_FAILURE' }
                     Assert-UpdateLaunch ($state.Warnings[0].Contains($marker)) "$scenario preserves cleanup failure details"
                     Assert-UpdateLaunch (Test-Path -LiteralPath $pending) "$scenario retains the recovery fixture"
+                } elseif ($scenario -eq 'first-run-then-configured') {
+                    Assert-UpdateLaunch ($state.Warnings.Count -eq 1) 'First-run startup reports retained recovery without failing startup'
+                    Assert-UpdateLaunch (Test-Path -LiteralPath $pending) 'First-run startup retains the owned pending recovery fixture'
                 } else {
                     Assert-UpdateLaunch ($state.Warnings.Count -eq 0) "$scenario has no unexpected warnings"
                 }
@@ -191,6 +246,18 @@ try {
                     Assert-UpdateLaunch ($state.HideConsole -eq ($scenario -eq 'pending-hidden')) "$scenario preserves hidden/visible GUI preference"
                 }
                 Assert-UpdateLaunch (-not (Test-Path -LiteralPath (Join-Path $fixture 'env'))) "$scenario never installs or runs a real Python environment"
+                if ($scenario -eq 'first-run-then-configured') {
+                    Assert-UpdateLaunch $state.ProfileConfigured 'First-run dialog saved a configured profile while startup was in progress'
+                    Assert-UpdateLaunch ($state.ProfileReadCount -eq 1) 'First-run readiness is captured exactly once before startup'
+                    $state.Events.Clear()
+                    $state.Warnings.Clear()
+                    $state.StartReturned = $false
+                    Invoke-LauncherSession
+                    Assert-UpdateLaunch ($state.ProfileReadCount -eq 2) 'Next launch reads the already configured profile'
+                    Assert-UpdateLaunch ($state.CompletionCount -eq 1 -and $state.LockHeld) 'Next configured launch completes recovery once under the existing lock'
+                    Assert-UpdateLaunch (($state.Events -join ',') -eq 'gui-start,gui-success,core-import,complete') 'Next configured launch completes only after GUI success'
+                    Assert-UpdateLaunch ($state.Warnings.Count -eq 0) 'Next configured launch needs no retention warning'
+                }
             }
         }
         catch { $failures.Add("${scenario}: $($_.Exception.Message)") }
@@ -207,4 +274,4 @@ finally {
 }
 if ($failures.Count) { throw ($failures -join "`n") }
 $global:LASTEXITCODE = 0
-Write-Host 'Update launch completion tests: OK (11 owned mocked launcher sessions)'
+Write-Host 'Update launch completion tests: OK (first-run retention and 13 owned mocked launcher sessions)'

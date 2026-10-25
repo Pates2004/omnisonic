@@ -13,7 +13,7 @@ microphone recording, reusable private presets, and Polish/English interfaces.
 - automatic and attribute-based voice design, including supported Chinese
   dialects and additional voice instructions;
 - pause, resume, stop, recording, manual save, and configurable auto-save;
-- preset creation in Clone and a dedicated manager for rename, rebuild and delete;
+- preset creation in Clone and the manager, with rename, rebuild and delete;
 - portable voice presets stored in the application's ignored `presets/` directory;
 - full access to OmniVoice's generation and long-form audio parameters;
 - optional fixed random seeds and in-memory reuse of an unchanged voice reference;
@@ -39,6 +39,9 @@ normal runtime validation/repair. Only the previous source files needed for the
 current rollback are retained. A successful new application start removes that
 backup and the verified download staging; a failed/interrupted update retains
 recovery data and checks it before executing the live launcher next time.
+If that launch begins with first-run Settings, the backup stays until the next
+successful start from an already configured profile. A settings dialog alone
+must not trigger backup cleanup before runtime/main-window initialization.
 
 Po polsku: przy starcie pojawi się pytanie o nową wersję z zielonymi testami,
 z numerem wersji, rewizją, datą i listą ostatnich zmian. **Nie** jest domyślne.
@@ -46,6 +49,8 @@ Odmowa lub brak sieci nie blokują obecnej wersji. Aktualizowane są tylko pliki
 programu, nie konfiguracja, presety, audio, modele ani Python. Najpierw zamknij
 działające okna aplikacji. Po aktualizacji program uruchamia się ponownie;
 kopia poprzednich źródeł i pliki pobierania są usuwane dopiero po udanym starcie.
+Jeśli start zaczyna się od pierwszej konfiguracji, kopia pozostaje do następnego
+poprawnego startu po konfiguracji — samo okno ustawień nie wystarcza do jej usunięcia.
 
 ZIP installations need the shipped `update_manifest.json`; old packages without
 it need one manual download of this version. Git checkouts must be clean, on
@@ -245,14 +250,32 @@ When **Hide launcher console** is enabled, normal launches are handed off to
 `pythonw.exe` so the console does not remain open with the application. The
 launcher waits for the actual Python process to open an application window;
 Windows virtual environments can first start a short-lived redirector process.
-The GUI itself is not started with a hidden window style. Import errors, model
-loading stages, and crashes are recorded in the ignored
+The GUI itself is not started with a hidden window style. Python exceptions,
+startup/model-loading checkpoints and best-effort fatal traces are recorded in the ignored
 `Workspace/launcher-logs/desktop-startup.log`. If the desktop quits before
 opening or takes longer than three minutes, the launcher reports that path
 instead of silently accepting the failed start. A failed hidden launch also
 displays a standard Windows error dialog. The console stays available during
 first-time installation and reappears if environment repair fails. Restart
 OmniSonic after changing this option.
+
+The startup-window message is a handshake, not a lifetime/GPU health guarantee.
+It can refer to the first-run Settings dialog before runtime imports and the
+main frame. The launcher stops observing after that window survives its short
+grace period. New logs identify the interpreter/source/package versions and
+checkpoint imports, settings, splash, main window, event loop and model loading.
+The timestamp/PID/backend header alone is written before application import.
+Native fast-fail or external termination may still leave no Python traceback;
+include the Windows Application error's faulting module/exception code and the
+working/failing environment versions in that case. Python stream redirection
+does not capture every native C stderr write.
+
+Po polsku: potwierdzenie wykrycia okna nie oznacza, że model już działa ani że
+proces nie zakończy się później. Może dotyczyć pierwszego okna ustawień. Log
+zawiera teraz wersje i etapy startu; sam nagłówek PID/Python/backend nie wskazuje
+przyczyny awarii. Przy zakończeniu bez tracebacka potrzebne mogą być moduł i kod
+błędu z Podglądu zdarzeń Windows. Nie usuwaj środowiska lub presetów na podstawie
+samej jednej linii logu.
 
 If loading the AI model reports only `[Errno 2] No such file or directory`, the
 short message does not identify the missing file. After reproducing the problem,
@@ -509,8 +532,12 @@ transcript. Treat them as private data. The complete `presets/` tree is ignored
 by Git.
 
 The **Voice Clone** tab has **Save preset**, using its loaded reference audio
-and transcript and asking for a name, just like **Ctrl+Shift+S**. The **Voice
-Presets** tab retains its list, refresh, edit, delete and delete-all actions.
+and transcript and asking for a name, just like **Ctrl+Shift+S**. Its preset row
+groups the selector, **Refresh** and **Save preset**, in that keyboard order.
+The **Voice Presets** tab also has **Save preset**, with its own source audio
+picker and transcript field, independent of Clone. Changing that source clears
+its old transcript. An empty transcript lets the engine transcribe the source
+when saving. The manager retains refresh, edit, delete and delete-all actions.
 Delete works on either preset list and shows the configured warning;
 Shift+Delete removes the selected preset without that warning. The new-file
 entry in Clone is never deleted. Preset changes are blocked during generation,
@@ -519,10 +546,14 @@ rebuild its voice data from a new source recording. The original audio path is
 not embedded in a preset, so choosing a replacement file during editing is
 optional.
 
-Po polsku: **Zapisz preset** jest w **Klonowaniu** i korzysta z bieżącego pliku
-referencyjnego oraz jego tekstu. Delete i Shift+Delete działają także na liście
+Po polsku: w **Klonowaniu** przycisk **Zapisz preset** jest bezpośrednio po
+**Odśwież** i korzysta z bieżącego pliku referencyjnego oraz jego tekstu.
+Zakładka **Presety** ma drugi przycisk zapisu, własny wybór pliku i pole tekstu
+nagrania. Zmiana pliku czyści tam poprzedni tekst; pusty tekst oznacza transkrypcję
+przy zapisie. Skrót **Ctrl+Shift+S** nadal korzysta z pliku z **Klonowania**.
+Delete i Shift+Delete działają także na liście
 w tej zakładce; pozycja „Brak — użyj nowego pliku” jest pomijana. Zakładka
-**Presety** nadal służy do zarządzania, edycji i usuwania wszystkich presetów.
+**Presety** nadal pozwala zarządzać, edytować i usuwać wszystkie presety.
 
 Choosing replacement audio in the preset editor clears the previous transcript;
 enter the new recording's text or leave it blank for Whisper. Clearing the

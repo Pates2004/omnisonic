@@ -122,7 +122,12 @@ foreach ($transaction in @('Runtime', 'Bootstrap')) {
     function Resolve-PythonMode { return [pscustomobject]@{ Mode = 'Portable'; SystemPython = $null } }
     function New-Item {}
     function Set-Content {}
-    function Test-Path { return $true }
+    function Test-Path {
+        param([string]$LiteralPath)
+        # This is an ordinary-launch fixture, not an update transaction. Do not
+        # let its broad existence stub import real recovery state from the checkout.
+        return $LiteralPath -notlike '*\.launcher\update-recovery\pending.json'
+    }
     function Test-Runtime { return $true }
     function Get-HideConsolePreference { return $true }
     function Test-HiddenLaunchReady { return $false }

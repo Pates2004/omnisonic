@@ -33,7 +33,7 @@ from .files import atomic_write, write_numbered_audio
 from .operations import OperationState, execute_worker
 from .model_lifecycle import ModelLifecycle
 from .randomness import seeded_generation
-from .startup import announce_window
+from .startup import announce_window, startup_phase
 from .shortcuts import (
     SHORTCUT_DEFINITIONS,
     default_shortcut_bindings,
@@ -235,11 +235,25 @@ def LoadRuntimeDependencies():
     global VoiceClonePrompt, load_waveform, accelerator_info, _ALL_LANGUAGES
     global resolve_voice_instruction
 
+    startup_phase("runtime.dependencies.begin")
     logging.info("Loading OmniSonic runtime dependencies")
+    startup_phase("runtime.numpy.begin")
     import numpy as _np
+
+    startup_phase("runtime.numpy.ready")
+    startup_phase("runtime.sounddevice.begin")
     import sounddevice as _sd
+
+    startup_phase("runtime.sounddevice.ready")
+    startup_phase("runtime.soundfile.begin")
     import soundfile as _sf
+
+    startup_phase("runtime.soundfile.ready")
+    startup_phase("runtime.torch.begin")
     import torch as _torch
+
+    startup_phase("runtime.torch.ready")
+    startup_phase("runtime.omnivoice.begin")
     from omnivoice import OmniVoice as _OV
     from omnivoice import OmniVoiceGenerationConfig as _OVC
     from omnivoice import VoiceClonePrompt as _VCP
@@ -247,6 +261,7 @@ def LoadRuntimeDependencies():
     from omnivoice.utils.lang_map import LANG_NAMES, lang_display_name
     from omnivoice.utils.voice_design import resolve_instruct
 
+    startup_phase("runtime.omnivoice.ready")
     np = _np
     sd = _sd
     sf = _sf
@@ -256,13 +271,16 @@ def LoadRuntimeDependencies():
     VoiceClonePrompt = _VCP
     load_waveform = _load_waveform
     resolve_voice_instruction = resolve_instruct
+    startup_phase("runtime.accelerator.begin")
     accelerator_info = detect_accelerator(_torch)
+    startup_phase("runtime.accelerator.ready")
     logging.info(
         "OmniSonic runtime ready: backend=%s, device=%s",
         accelerator_info.backend,
         accelerator_info.device,
     )
     _ALL_LANGUAGES[:] = ["Auto"] + sorted(lang_display_name(n) for n in LANG_NAMES)
+    startup_phase("runtime.dependencies.ready")
 
 
 class StartupSplash:
@@ -2082,6 +2100,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             "batch_recursive",
             "batch_preserve_structure",
             "btn_save_preset",
+            "btn_save_managed_preset",
             "btn_transcribe_ref",
             "combo_presets",
             "list_presets",
@@ -2361,8 +2380,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         btn_refresh = wx.Button(tab, label=self._("refresh"))
         btn_refresh.Bind(wx.EVT_BUTTON, lambda e: self.RefreshPresets())
 
+        self.btn_save_preset = wx.Button(tab, label=self._("btn_save_preset_clone"))
+        self.btn_save_preset.SetName(self._("btn_save_preset_clone"))
+        self.btn_save_preset.Bind(wx.EVT_BUTTON, self.OnSavePresetPrompt)
+
         hbox_p.Add(self.combo_presets, 1, wx.EXPAND | wx.RIGHT, 5)
-        hbox_p.Add(btn_refresh, 0, wx.EXPAND, 0)
+        hbox_p.Add(btn_refresh, 0, wx.EXPAND | wx.RIGHT, 5)
+        hbox_p.Add(self.btn_save_preset, 0, wx.EXPAND)
         vbox.Add(hbox_p, 0, wx.EXPAND | wx.ALL, 5)
         label = wx.StaticText(tab, label=self._("ref_audio"))
         vbox.Add(label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
@@ -2408,11 +2432,6 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.btn_transcribe_ref.Bind(wx.EVT_BUTTON, self.OnTranscribeReference)
         ref_text_row.Add(self.btn_transcribe_ref, 0, wx.EXPAND)
         vbox.Add(ref_text_row, 0, wx.EXPAND | wx.ALL, 5)
-
-        self.btn_save_preset = wx.Button(tab, label=self._("btn_save_preset_clone"))
-        self.btn_save_preset.SetName(self._("btn_save_preset_clone"))
-        self.btn_save_preset.Bind(wx.EVT_BUTTON, self.OnSavePresetPrompt)
-        vbox.Add(self.btn_save_preset, 0, wx.ALL | wx.EXPAND, 5)
 
         instruct_label = wx.StaticText(tab, label=self._("clone_instruct"))
         vbox.Add(instruct_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
@@ -2468,7 +2487,34 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         buttons.Add(self.btn_del_all_presets_manager, 1)
         vbox.Add(buttons, 0, wx.ALL | wx.EXPAND, 5)
 
+        source_label = wx.StaticText(tab, label=self._("preset_source_audio"))
+        vbox.Add(source_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
+        source_row = wx.BoxSizer(wx.HORIZONTAL)
+        self.preset_source_audio = wx.TextCtrl(tab)
+        self.preset_source_audio.SetName(self._("preset_source_audio"))
+        source_row.Add(self.preset_source_audio, 1, wx.EXPAND | wx.RIGHT, 5)
+        browse_button = wx.Button(tab, label=self._("browse"))
+        browse_button.Bind(wx.EVT_BUTTON, lambda event: self.BrowseFor(self.preset_source_audio))
+        source_row.Add(browse_button, 0, wx.EXPAND)
+        vbox.Add(source_row, 0, wx.ALL | wx.EXPAND, 5)
+
+        ref_text_label = wx.StaticText(tab, label=self._("preset_source_ref_text"))
+        vbox.Add(ref_text_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
+        self.preset_source_ref_text = wx.TextCtrl(tab)
+        self.preset_source_ref_text.SetName(self._("preset_source_ref_text"))
+        self.preset_source_audio.Bind(wx.EVT_TEXT, self.OnPresetSourceChanged)
+        vbox.Add(self.preset_source_ref_text, 0, wx.ALL | wx.EXPAND, 5)
+
+        self.btn_save_managed_preset = wx.Button(tab, label=self._("btn_save_preset_clone"))
+        self.btn_save_managed_preset.SetName(self._("btn_save_preset_clone"))
+        self.btn_save_managed_preset.Bind(wx.EVT_BUTTON, self.OnSaveManagedPreset)
+        vbox.Add(self.btn_save_managed_preset, 0, wx.ALL | wx.EXPAND, 5)
+
         tab.SetSizer(vbox)
+
+    def OnPresetSourceChanged(self, event):
+        self.preset_source_ref_text.ChangeValue("")
+        event.Skip()
 
     def SetupDesignTab(self, tab):
         vbox = wx.BoxSizer(wx.VERTICAL)
@@ -2941,7 +2987,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         if asr_name:
             kwargs["asr_model_name"] = asr_name
         logging.info("Loading OmniVoice model on %s with dtype=%s", device, dtype)
-        model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", **kwargs)
+        startup_phase("model.load.begin")
+        try:
+            model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", **kwargs)
+        except Exception:
+            startup_phase("model.load.failed")
+            raise
+        startup_phase("model.load.ready")
         logging.info("OmniVoice model loaded on %s", device)
         return model
 
@@ -3324,6 +3376,11 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     def OnSavePresetPrompt(self, event):
         ref_audio = self.clone_ref_audio.GetValue().strip()
         ref_text = self.clone_ref_text.GetValue().strip() or None
+        self._PromptAndSavePreset(ref_audio, ref_text)
+
+    def OnSaveManagedPreset(self, event):
+        ref_audio = self.preset_source_audio.GetValue().strip()
+        ref_text = self.preset_source_ref_text.GetValue().strip() or None
         self._PromptAndSavePreset(ref_audio, ref_text)
 
     def _PromptAndSavePreset(self, ref_audio, ref_text):
@@ -4109,11 +4166,16 @@ def main():
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
+    startup_phase("wx.app.begin")
     app = wx.App(False)
+    startup_phase("wx.app.ready")
 
     try:
+        startup_phase("user.data.begin")
         migrate_legacy_user_data()
+        startup_phase("user.data.ready")
     except OSError as exc:
+        startup_phase("user.data.failed")
         logging.exception("Could not initialize the OmniSonic user-data directory")
         wx.MessageBox(
             translate(LOCALE, "en", "user_data_error").format(error=str(exc)),
@@ -4122,12 +4184,15 @@ def main():
         )
         return 1
 
+    startup_phase("settings.load.begin")
     cfg = LoadBasicConfig()
+    startup_phase("settings.load.ready")
     SetConsoleVisible(not cfg.get("hide_console", True))
 
     if not cfg.get("first_run_done", False):
+        startup_phase("settings.first_run.begin")
         dlg = SettingsDialog(None, is_first_run=True, current_cfg=cfg)
-        wx.CallAfter(announce_window)
+        wx.CallAfter(lambda: announce_window(kind="settings"))
         if dlg.ShowModal() == wx.ID_OK:
             cfg = dlg.cfg
             try:
@@ -4143,14 +4208,19 @@ def main():
                 dlg.Destroy()
                 return 1
         else:
+            startup_phase("settings.first_run.cancelled")
             dlg.Destroy()
             return 0
         dlg.Destroy()
+        startup_phase("settings.first_run.ready")
 
     if cfg.get("hide_console", True) or cfg.get("force_splash"):
+        startup_phase("runtime.splash.begin")
         splash = StartupSplash(None, cfg)
         if splash.ShowModal() != wx.ID_OK:
+            startup_phase("runtime.splash.cancelled")
             return 1
+        startup_phase("runtime.splash.ready")
     else:
         try:
             LoadRuntimeDependencies()
@@ -4165,10 +4235,14 @@ def main():
             )
             return 1
 
+    startup_phase("window.main.begin")
     frame = OmniVoiceFrame(cfg, None)
+    startup_phase("window.main.constructed")
     frame.Show(True)
     announce_window()
+    startup_phase("event_loop.begin")
     app.MainLoop()
+    startup_phase("event_loop.returned")
     return 0
 
 

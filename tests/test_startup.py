@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import ast
+import importlib.metadata
+import io
+import json
 import logging
 import os
 import sys
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from omnisonic.startup import announce_window, run
+from omnisonic.startup import announce_window, run, startup_phase
 from omnisonic.operations import OperationState, execute_worker
 from tests.materials import scratch_directory
 
@@ -118,6 +125,172 @@ class StartupTests(unittest.TestCase):
         self.assertIn("Traceback (most recent call last)", contents)
         self.assertIn("missing_model_file", contents)
         self.assertIn("FileNotFoundError: [Errno 2] No such file or directory", contents)
+
+    def test_phase_flushes_directly_to_log_and_rejects_non_identifier_content(self):
+        log_file = self.folder / "phases.log"
+        stdout = io.StringIO()
+        with (
+            patch.dict(os.environ, {"OMNISONIC_STARTUP_LOG": str(log_file)}),
+            redirect_stdout(stdout),
+        ):
+            startup_phase("runtime.torch.begin")
+            self.assertIn("phase=runtime.torch.begin", log_file.read_text(encoding="utf-8"))
+            startup_phase("private reference text\nshould never be a phase")
+            startup_phase("C:/private/audio.wav")
+        self.assertEqual(stdout.getvalue(), "")
+        contents = log_file.read_text(encoding="utf-8")
+        self.assertEqual(len(contents.splitlines()), 1)
+        self.assertNotIn("private", contents)
+
+    def test_phase_write_failure_cannot_fail_the_application(self):
+        log_file = self.folder / "phase-error.log"
+
+        def application():
+            with patch("pathlib.Path.open", side_effect=PermissionError("Synthetic log failure")):
+                startup_phase("runtime.torch.begin")
+            return 0
+
+        with patch.dict(os.environ, {"OMNISONIC_STARTUP_LOG": str(log_file)}):
+            self.assertEqual(run(application), 0)
+        self.assertIn("finished with status 0", log_file.read_text(encoding="utf-8"))
+
+    def test_no_log_environment_keeps_stdout_unchanged(self):
+        stdout = io.StringIO()
+        with (
+            patch.dict(os.environ, {"OMNISONIC_STARTUP_LOG": ""}),
+            redirect_stdout(stdout),
+            patch("omnisonic.startup._publish_process"),
+        ):
+            startup_phase("application.begin")
+            self.assertEqual(run(lambda: print("Owned application output")), 0)
+        self.assertEqual(stdout.getvalue(), "Owned application output\n")
+
+    def test_runtime_metadata_uses_only_a_fixed_distribution_whitelist(self):
+        log_file = self.folder / "metadata.log"
+        expected = {
+            "omnisonic",
+            "wxPython",
+            "numpy",
+            "torch",
+            "torchaudio",
+            "transformers",
+            "sounddevice",
+            "soundfile",
+        }
+        with (
+            patch.dict(os.environ, {"OMNISONIC_STARTUP_LOG": str(log_file)}),
+            patch.object(importlib.metadata, "version", return_value="1.2.3") as version,
+        ):
+            self.assertEqual(run(lambda: 0), 0)
+        self.assertEqual({call.args[0] for call in version.call_args_list}, expected)
+        self.assertEqual(version.call_count, len(expected))
+        lines = log_file.read_text(encoding="utf-8").splitlines()
+        line = next(line for line in lines if line.startswith("Runtime metadata: "))
+        metadata = json.loads(line.removeprefix("Runtime metadata: "))
+        self.assertEqual(metadata["executable"], sys.executable)
+        self.assertEqual(metadata["prefix"], sys.prefix)
+        self.assertEqual(metadata["base_prefix"], sys.base_prefix)
+        self.assertEqual(set(metadata["packages"]), expected)
+
+    def test_unreadable_distribution_metadata_does_not_prevent_startup(self):
+        log_file = self.folder / "bad-metadata.log"
+        application = Mock(return_value=0)
+        with (
+            patch.dict(os.environ, {"OMNISONIC_STARTUP_LOG": str(log_file)}),
+            patch.object(importlib.metadata, "version", side_effect=OSError("Metadata unreadable")),
+        ):
+            self.assertEqual(run(application), 0)
+        application.assert_called_once_with()
+        self.assertIn('"torch": "unavailable"', log_file.read_text(encoding="utf-8"))
+
+    def test_import_failure_records_phase_before_import_and_preserves_traceback(self):
+        log_file = self.folder / "import-error.log"
+        original_import = __import__
+
+        def fail_application_import(name, *args, **kwargs):
+            if name == "app" and kwargs.get("level", args[3] if len(args) > 3 else 0) == 1:
+                raise RuntimeError("Synthetic native-module import boundary")
+            return original_import(name, *args, **kwargs)
+
+        with (
+            patch.dict(os.environ, {"OMNISONIC_STARTUP_LOG": str(log_file)}),
+            patch("builtins.__import__", side_effect=fail_application_import),
+        ):
+            self.assertEqual(run(), 1)
+        contents = log_file.read_text(encoding="utf-8")
+        self.assertIn("phase=application.import.begin", contents)
+        self.assertIn("phase=application.failed", contents)
+        self.assertNotIn("phase=application.import.ready", contents)
+        self.assertIn("Synthetic native-module import boundary", contents)
+
+    def test_settings_readiness_kind_keeps_the_exact_pid_handshake(self):
+        marker = self.folder / "settings-ready.txt"
+        log_file = self.folder / "settings-ready.log"
+        with patch.dict(
+            os.environ,
+            {"OMNISONIC_STARTUP_READY": str(marker), "OMNISONIC_STARTUP_LOG": str(log_file)},
+        ):
+            announce_window(kind="settings")
+            self.assertEqual(marker.read_text(encoding="ascii"), str(os.getpid()))
+            announce_window()
+        contents = log_file.read_text(encoding="utf-8")
+        self.assertIn("phase=window.settings.ready", contents)
+        self.assertIn("phase=window.main.ready", contents)
+
+    def test_first_settings_window_does_not_claim_main_frame_or_runtime_readiness(self):
+        events = []
+        callbacks = []
+        cfg = {"first_run_done": False, "hide_console": False}
+
+        class Settings:
+            def __init__(self, *_args, **_kwargs):
+                self.cfg = cfg
+
+            def ShowModal(self):
+                for callback in callbacks:
+                    callback()
+                return 1
+
+            def Destroy(self):
+                pass
+
+        def fail_runtime():
+            events.append("runtime.import.failed")
+            raise RuntimeError("Owned dependency failure")
+
+        namespace = {
+            "logging": Mock(),
+            "wx": SimpleNamespace(
+                App=Mock(),
+                CallAfter=lambda callback: callbacks.append(callback),
+                ID_OK=1,
+                OK=2,
+                ICON_ERROR=4,
+                MessageBox=Mock(),
+            ),
+            "startup_phase": events.append,
+            "migrate_legacy_user_data": Mock(),
+            "LoadBasicConfig": lambda: cfg,
+            "SetConsoleVisible": Mock(),
+            "SettingsDialog": Settings,
+            "announce_window": lambda kind="main": events.append("window." + kind + ".ready"),
+            "SaveBasicConfig": Mock(),
+            "LoadRuntimeDependencies": fail_runtime,
+            "translate": lambda *_args: "{error}",
+            "LOCALE": {},
+        }
+        source = Path(__file__).resolve().parents[1] / "omnisonic" / "app.py"
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        main = next(
+            node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main"
+        )
+        exec(compile(ast.Module(body=[main], type_ignores=[]), str(source), "exec"), namespace)
+        self.assertEqual(namespace["main"](), 1)
+        self.assertLess(
+            events.index("window.settings.ready"), events.index("runtime.import.failed")
+        )
+        self.assertNotIn("window.main.ready", events)
+        self.assertNotIn("event_loop.begin", events)
 
 
 if __name__ == "__main__":

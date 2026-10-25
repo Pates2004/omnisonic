@@ -200,6 +200,56 @@ class ClonePresetTests(unittest.TestCase):
         load_handler("OnSavePresetPrompt", {})(frame, None)
         frame._PromptAndSavePreset.assert_called_once_with("synthetic.wav", "Synthetic transcript.")
 
+    def test_manager_save_uses_only_its_independent_source_and_transcript(self):
+        frame = SimpleNamespace(
+            clone_ref_audio=SimpleNamespace(GetValue=lambda: "clone.wav"),
+            clone_ref_text=SimpleNamespace(GetValue=lambda: "Clone transcript"),
+            preset_source_audio=SimpleNamespace(GetValue=lambda: " manager.wav "),
+            preset_source_ref_text=SimpleNamespace(GetValue=lambda: " Manager transcript. "),
+            _PromptAndSavePreset=Mock(),
+        )
+        handler = load_handler("OnSaveManagedPreset", {})
+        handler(frame, None)
+        frame._PromptAndSavePreset.assert_called_once_with("manager.wav", "Manager transcript.")
+        frame._PromptAndSavePreset.reset_mock()
+        frame.preset_source_ref_text.GetValue = lambda: "  "
+        handler(frame, None)
+        frame._PromptAndSavePreset.assert_called_once_with("manager.wav", None)
+
+    def test_manager_source_change_clears_its_transcript_without_touching_clone(self):
+        frame = SimpleNamespace(
+            clone_ref_text=SimpleNamespace(ChangeValue=Mock()),
+            preset_source_ref_text=SimpleNamespace(ChangeValue=Mock()),
+        )
+        event = SimpleNamespace(Skip=Mock())
+        load_handler("OnPresetSourceChanged", {})(frame, event)
+        frame.preset_source_ref_text.ChangeValue.assert_called_once_with("")
+        frame.clone_ref_text.ChangeValue.assert_not_called()
+        event.Skip.assert_called_once()
+
+    def test_both_save_buttons_share_operation_and_recording_control_state(self):
+        clone, manager = Mock(), Mock()
+        frame = SimpleNamespace(
+            btn_save_preset=clone,
+            btn_save_managed_preset=manager,
+            rec_stream=None,
+            rec_data=(),
+        )
+        handler = load_handler("_set_operation_controls_enabled", {})
+        for enabled, stream, chunks, expected in (
+            (True, None, (), True),
+            (False, None, (), False),
+            (True, object(), (), False),
+            (True, None, [b"Synthetic pending take"], False),
+        ):
+            with self.subTest(enabled=enabled, stream=stream is not None, chunks=bool(chunks)):
+                clone.reset_mock()
+                manager.reset_mock()
+                frame.rec_stream, frame.rec_data = stream, chunks
+                handler(frame, enabled)
+                clone.Enable.assert_called_once_with(expected)
+                manager.Enable.assert_called_once_with(expected)
+
     def test_save_shortcut_selects_clone_tab_and_uses_same_handler(self):
         frame = SimpleNamespace(
             notebook=SimpleNamespace(SetSelection=Mock()),

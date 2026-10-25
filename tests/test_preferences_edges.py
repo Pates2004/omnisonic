@@ -153,7 +153,7 @@ class WxPreferenceEdgeTests(unittest.TestCase):
             editor.Destroy()
             self.application.Yield()
 
-    def test_preset_manager_retains_edit_and_delete_without_separate_save_source(self):
+    def test_preset_manager_keeps_actions_and_independent_save_source(self):
         frame = self.wx.Frame(None)
         panel = self.wx.Panel(frame)
         view = SimpleNamespace(_=lambda key: key)
@@ -163,6 +163,8 @@ class WxPreferenceEdgeTests(unittest.TestCase):
             "RefreshPresets",
             "OnDelPreset",
             "OnDelAllPresets",
+            "OnSaveManagedPreset",
+            "OnPresetSourceChanged",
         ):
             setattr(view, name, Mock())
         try:
@@ -172,10 +174,15 @@ class WxPreferenceEdgeTests(unittest.TestCase):
                 "btn_edit_preset",
                 "btn_del_preset_manager",
                 "btn_del_all_presets_manager",
+                "preset_source_audio",
+                "preset_source_ref_text",
+                "btn_save_managed_preset",
             ):
                 self.assertIs(getattr(view, name).GetParent(), panel)
-            for name in ("preset_source_audio", "preset_source_ref_text", "btn_save_preset"):
-                self.assertFalse(hasattr(view, name))
+            self.assertEqual(view.preset_source_audio.GetName(), "preset_source_audio")
+            self.assertEqual(view.preset_source_ref_text.GetName(), "preset_source_ref_text")
+            self.assertEqual(view.btn_save_managed_preset.GetName(), "btn_save_preset_clone")
+            self.assertFalse(hasattr(view, "btn_save_preset"))
         finally:
             frame.Destroy()
             self.application.Yield()

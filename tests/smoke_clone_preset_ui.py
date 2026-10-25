@@ -6,7 +6,7 @@ import json
 import os
 import time
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from tests.materials import scratch_directory
 
@@ -123,21 +123,59 @@ def main():
                 assert frame.btn_save_preset.GetParent() is frame.tab_clone
                 assert frame.btn_save_preset.GetName() == frame._("btn_save_preset_clone")
                 assert frame.combo_presets.GetName() == frame._("preset_list")
-                assert not hasattr(frame, "preset_source_audio")
-                assert not hasattr(frame, "preset_source_ref_text")
+                assert frame.preset_source_audio.GetName() == frame._("preset_source_audio")
+                assert frame.preset_source_ref_text.GetName() == frame._("preset_source_ref_text")
                 for control in (
                     frame.list_presets,
                     frame.btn_edit_preset,
                     frame.btn_del_preset_manager,
                     frame.btn_del_all_presets_manager,
+                    frame.preset_source_audio,
+                    frame.preset_source_ref_text,
+                    frame.btn_save_managed_preset,
                 ):
                     assert control.GetParent() is frame.tab_presets
                 clone_children = frame.tab_clone.GetChildren()
-                assert (
-                    clone_children.index(frame.clone_ref_text)
-                    < clone_children.index(frame.btn_save_preset)
-                    < clone_children.index(frame.clone_instruct)
+                preset_row = frame.combo_presets.GetContainingSizer()
+                row_controls = [item.GetWindow() for item in preset_row.GetChildren()]
+                assert row_controls[0] is frame.combo_presets
+                refresh = row_controls[1]
+                assert refresh.GetLabel() == frame._("refresh")
+                assert row_controls[2] is frame.btn_save_preset
+                assert clone_children.index(refresh) + 1 == clone_children.index(
+                    frame.btn_save_preset
                 )
+                assert clone_children.index(frame.btn_save_preset) < clone_children.index(
+                    frame.clone_ref_audio
+                )
+                frame.Show()
+                application.Yield()
+                refresh.SetFocus()
+                application.Yield()
+                assert refresh.Navigate()
+                application.Yield()
+                assert wx.Window.FindFocus() is frame.btn_save_preset
+                # Only the navigation probe needs a shown frame. Keep the rest
+                # of the synthetic direct callbacks from competing for focus.
+                frame.Hide()
+                application.Yield()
+
+                manager_reference = scratch / f"{language}-manager-reference.opus"
+                manager_reference.write_bytes(b"Synthetic Opus; encoding is mocked")
+                frame.preset_source_ref_text.SetValue("Old manager transcript")
+                source_row = frame.preset_source_audio.GetContainingSizer()
+                manager_browse = source_row.GetChildren()[1].GetWindow()
+                file_dialog = MagicMock()
+                file_dialog.__enter__.return_value = file_dialog
+                file_dialog.ShowModal.return_value = wx.ID_OK
+                file_dialog.GetPath.return_value = str(manager_reference)
+                with patch.object(wx, "FileDialog", return_value=file_dialog):
+                    click(manager_browse)
+                assert frame.preset_source_audio.GetValue() == str(manager_reference)
+                assert frame.preset_source_ref_text.GetValue() == ""
+                assert frame.clone_ref_audio.GetValue() == str(reference)
+                assert frame.clone_ref_text.GetValue() == "Synthetic reference transcript."
+                frame.preset_source_ref_text.SetValue("Independent manager transcript.")
 
                 with (
                     patch.object(wx, "TextEntryDialog", side_effect=name_dialog),
@@ -187,27 +225,46 @@ def main():
                         frame._set_operation_controls_enabled(name != "current_op")
                         assert not frame.combo_presets.IsEnabled()
                         assert not frame.btn_save_preset.IsEnabled()
+                        assert not frame.btn_save_managed_preset.IsEnabled()
                         count = len(names)
                         frame.OnClonePresetKeyDown(
                             Mock(GetKeyCode=lambda: wx.WXK_DELETE, ShiftDown=lambda: True)
                         )
                         frame.OnSavePresetPrompt(None)
+                        frame.OnSaveManagedPreset(None)
                         assert alpha.exists() and len(names) == count
                         setattr(frame, name, [] if name == "rec_data" else None)
                         frame._set_operation_controls_enabled(True)
                     assert frame.combo_presets.IsEnabled() and frame.btn_save_preset.IsEnabled()
+                    assert frame.btn_save_managed_preset.IsEnabled()
 
                     delete(frame.combo_presets, shift=True)
                     assert not alpha.exists() and len(warnings) == warning_count
                     assert frame.combo_presets.GetCount() == 1 and not frame.list_presets.GetCount()
                     next_name = f"{language}-Manager"
-                    click(frame.btn_save_preset)
+                    frame.notebook.SetSelection(1)
+                    click(frame.btn_save_managed_preset)
                     pump(frame)
                     manager = desktop.PRESETS_DIR / f"{next_name}.pt"
+                    assert calls[-1]["ref_audio"] == str(manager_reference)
+                    assert calls[-1]["ref_text"] == "Independent manager transcript."
+                    assert frame.clone_ref_audio.GetValue() == str(reference)
+                    assert frame.clone_ref_text.GetValue() == "Synthetic reference transcript."
+                    assert frame.notebook.GetCurrentPage() is frame.tab_presets
                     select(frame.list_presets, manager.name)
                     delete(frame.list_presets, shift=True)
                     assert not manager.exists() and frame.combo_presets.GetCount() == 1
+                    next_name = f"{language}-Manager-ASR"
+                    frame.preset_source_ref_text.ChangeValue("")
+                    click(frame.btn_save_managed_preset)
+                    pump(frame)
+                    manager = desktop.PRESETS_DIR / f"{next_name}.pt"
+                    assert calls[-1]["ref_text"] is None
+                    select(frame.list_presets, manager.name)
+                    delete(frame.list_presets, shift=True)
+                    assert not manager.exists() and not frame.list_presets.GetCount()
                     assert reference.is_file()
+                    assert manager_reference.is_file()
                     messages.assert_not_called()
             finally:
                 if frame.current_op is not None:
@@ -220,7 +277,7 @@ def main():
                 application.Yield()
     finally:
         application.Destroy()
-    print("Clone save button/shortcut and selected Delete/Shift+Delete, PL/EN, busy safety: OK")
+    print("Clone grouped save/Tab order, independent manager save, Delete/Shift+Delete, PL/EN: OK")
     print(f"Synthetic fixtures: {scratch}")
 
 
