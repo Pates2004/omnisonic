@@ -259,6 +259,15 @@ displays a standard Windows error dialog. The console stays available during
 first-time installation and reappears if environment repair fails. Restart
 OmniSonic after changing this option.
 
+The GUI is explicitly started with a normal window style even when its launcher
+is hidden. This fixes an invisible first-run Settings window on portable Python;
+it does not require replacing Python, reinstalling GPU packages, or disabling
+the console-hiding preference.
+
+Po polsku: ukrywana jest konsola launchera, nie okno aplikacji. Jawny normalny
+styl okna naprawia niewidoczne ustawienia pierwszego uruchomienia na Pythonie
+portable, bez wymiany Pythona i reinstalacji pakietów GPU.
+
 The startup-window message is a handshake, not a lifetime/GPU health guarantee.
 It can refer to the first-run Settings dialog before runtime imports and the
 main frame. The launcher stops observing after that window survives its short
@@ -649,6 +658,12 @@ For a full standalone ROCm installation on a supported AMD device, run
 an isolated Python and GPU runtime under the central project's
 `Workspace/amd-portable-validation/`,
 without replacing the application's `venv/`, `config/`, or presets.
+
+The ready-mode child checks its actual Windows `STARTUPINFO`, so the portable
+regression rejects `SW_HIDE` rather than accepting a PID marker alone. Optional
+`tests.smoke_startup_window`, launched through `Start-DesktopGui` as its
+`StartupModule`, checks native visibility of the real first-run Settings dialog
+without a console, model loading, or writes to the user's configuration.
 
 `tests/test_operation_dispatch.py` covers queued GUI completions, cancellation
 dialogs and stale callbacks. `tests/test_demo_reference.py` covers web clone

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "algorithm": "sha256-lf",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "files": [
     {
       "path": ".gitattributes",
@@ -53,7 +53,7 @@
     },
     {
       "path": "desktop_launcher.ps1",
-      "sha256": "348d9fefd2363ccb0f7c69fd1fb3d098b8cbf51e567a2ea47e184fb1ba29821b"
+      "sha256": "b6584b6d6c453f4ce27a20655fdc0f5e5ff2e2ff01d7dde95aee327009a29151"
     },
     {
       "path": "desktop_update_runtime.ps1",
@@ -193,7 +193,7 @@
     },
     {
       "path": "omnisonic/__init__.py",
-      "sha256": "dfeaffcf690b5bffcaa78fe984ac8598cf463a7d3c13125370e0928ad794b270"
+      "sha256": "d3dd4e738d5242588313089048d30c5c3d8423e4f73982948373a522e8127b5d"
     },
     {
       "path": "omnisonic/accelerator.py",
@@ -477,11 +477,11 @@
     },
     {
       "path": "pyproject.toml",
-      "sha256": "d67964473af1e25dd48571d8f3b0f7fae12422b5f9451f6f2f275754f201e0b6"
+      "sha256": "61f21cfef875c0633766c316610a83662b6b34009e1b488d97a9e2c6b8f7b2b3"
     },
     {
       "path": "README.md",
-      "sha256": "b879ff4ae6a0aefbc39337796edfb068229005911de36204dc3bf40bc326af43"
+      "sha256": "3eb474719fd1c5881e2c90c9be9be5b2c0936cf98fb135b761144799bbbcd630"
     },
     {
       "path": "requirements-desktop.txt",
@@ -576,6 +576,10 @@
       "sha256": "db6a984f5833cbcda3db8c77d6eee53de0793032603f68d550626b5e4a2c2959"
     },
     {
+      "path": "tests/smoke_startup_window.py",
+      "sha256": "a0f5ce4ece91745a4c066bcbb6c7ab45bec4cb79423f788556c7635f94af00fe"
+    },
+    {
       "path": "tests/smoke_subtitle_inference.py",
       "sha256": "72da89455db18fe9af40c6c4e5b2ab0763c94372ba236c86dc273152e385fa70"
     },
@@ -593,7 +597,7 @@
     },
     {
       "path": "tests/startup_stub.py",
-      "sha256": "ce38e5578d4a062956015fcc00df18953ddb63d88be8f5d608937d075c5f9cb7"
+      "sha256": "bdc69b45d6c7281e7ec526d2eacde5c85f42d711e44cdbbf060834ac63ae064f"
     },
     {
       "path": "tests/test_batch.py",
@@ -741,7 +745,7 @@
     },
     {
       "path": "tests/test_python_isolation.ps1",
-      "sha256": "c2bde57b6dae46ba1fa90b061e478638b30cb425ab966145f511ed7d9f2eec11"
+      "sha256": "ae3deaccd294ee5a614b462bf63f316fb93d906ad0f52cfc327230cb8a6bce7b"
     },
     {
       "path": "tests/test_randomness.py",

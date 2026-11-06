@@ -197,9 +197,11 @@ function Start-DesktopGui {
     $removeReady = $true
     try {
         $process = Invoke-WithIsolatedPythonEnvironment {
+            # pythonw already avoids a console. SW_HIDE would hide wx's first
+            # window too, especially without a system-venv redirector.
             Start-Process -FilePath $guiPython `
                 -ArgumentList @('-E', '-s', '-m', $StartupModule) `
-                -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru
+                -WorkingDirectory $ProjectRoot -WindowStyle Normal -PassThru
         }
         if (-not $process) { throw "Could not start pythonw.exe. Log: $($script:LastStartupLog)" }
         $timer = [Diagnostics.Stopwatch]::StartNew()

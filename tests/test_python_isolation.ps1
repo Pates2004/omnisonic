@@ -186,7 +186,7 @@ try {
                 param($FilePath, $ArgumentList, $WorkingDirectory, $WindowStyle, [switch]$PassThru)
                 Assert-IsolationTest (-not $env:PYTHONHOME -and -not $env:PYTHONPATH) 'Hidden application receives clean Python paths'
                 Assert-IsolationTest ($env:PYTHONNOUSERSITE -eq '1') 'Hidden descendants exclude user site'
-                Assert-IsolationTest ($WindowStyle -eq 'Hidden') 'Background helper starts hidden'
+                Assert-IsolationTest ($WindowStyle -eq 'Normal') 'GUI is visible even when the launcher console is hidden'
                 throw 'EXPECTED_HIDDEN_TEST_EXIT'
             }
             $WorkDir = Join-Path $scratch '.launcher'
