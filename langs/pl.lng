@@ -307,7 +307,7 @@
     "batch_file": "Plik źródłowy",
     "batch_status": "Stan",
     "batch_result": "Plik wynikowy lub błąd",
-    "batch_mode": "Tryb głosu (ustawienia z jego głównej zakładki):",
+    "batch_mode": "Źródło ustawień głosu:",
     "batch_output": "Folder wynikowy (powstanie nowy podfolder dla tej kolejki):",
     "batch_start": "Przetwórz pliki",
     "batch_text_filter": "Tekst i napisy (*.txt;*.md;*.srt;*.vtt)|*.txt;*.md;*.srt;*.vtt|Pliki tekstowe (*.txt;*.md)|*.txt;*.md|Napisy (*.srt;*.vtt)|*.srt;*.vtt",
@@ -370,5 +370,9 @@
     "update_downloading": "Pobieranie zweryfikowanej aktualizacji źródeł OmniSonic...",
     "update_unavailable": "Nie zastosowano aktualizacji; używana jest obecna instalacja. Szczegóły: {0}",
     "update_restart_failed": "Nowe pliki programu są zainstalowane, ale nie udało się ponownie uruchomić launchera. Uruchom OmniSonic ponownie; pliki odzyskiwania zostały zachowane. Szczegóły: {0}",
-    "update_recovery_required": "Przed uruchomieniem OmniSonic trzeba zakończyć odzyskiwanie aktualizacji. Pliki odzyskiwania: {0}. Szczegóły: {1}"
+    "update_recovery_required": "Przed uruchomieniem OmniSonic trzeba zakończyć odzyskiwanie aktualizacji. Pliki odzyskiwania: {0}. Szczegóły: {1}",
+    "btn_close": "Zamknij",
+    "batch_custom": "Niestandardowe",
+    "batch_custom_voice": "Niestandardowy tryb głosu:",
+    "batch_invalid_mode": "Wybierz prawidłowy tryb głosu do przetwarzania masowego."
 }

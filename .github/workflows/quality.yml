@@ -28,6 +28,8 @@ jobs:
         run: python -B tools/update_manifest.py --check
       - name: Test Clone preset controls and single-waveform denoising
         run: python -m unittest -v tests.test_clone_preset_ui tests.test_denoise_processor tests.test_update_manifest
+      - name: Test custom batch settings and accessible voice tags
+        run: python -m unittest -v tests.test_custom_batch_ui tests.test_tag_help
       - name: Test desktop logic
         run: python -m unittest -v tests.test_desktop_logic tests.test_runtime_requirements tests.test_batch tests.test_reference_audio tests.test_model_lifecycle tests.test_operation_dispatch tests.test_preset_selection tests.test_preset_file_safety tests.test_playback tests.test_numeric_controls tests.test_ui_preferences tests.test_normalization_ui tests.test_generation_inputs tests.test_text_normalization tests.test_inference_validation tests.test_demo_reference tests.test_file_safety tests.test_startup
       - name: Test transactional runtime entry-point repair

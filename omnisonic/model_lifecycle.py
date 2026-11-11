@@ -88,16 +88,17 @@ class ModelLifecycle:
 
     def release_model(self):
         self._reference_cache.clear()
-        if self.model is not None:
-            release_caches = getattr(self.model, "release_inference_caches", None)
+        model = self.model
+        self.model = None
+        self.needs_collection = True
+        if model is not None:
+            # Whisper has its own policy. Keep it without retaining OmniVoice.
+            self.asr_pipe = getattr(model, "_asr_pipe", None)
+            model._asr_pipe = None
+            self._model_was_released = True
+            release_caches = getattr(model, "release_inference_caches", None)
             if callable(release_caches):
                 release_caches()
-            # Whisper has its own policy. Keep it without retaining OmniVoice.
-            self.asr_pipe = getattr(self.model, "_asr_pipe", None)
-            self.model._asr_pipe = None
-            self.model = None
-            self._model_was_released = True
-        self.needs_collection = True
 
     def clear_reference_prompt_cache(self):
         """Discard conditioning after a failed batch item without stopping its queue."""
@@ -127,8 +128,11 @@ class ModelLifecycle:
         self.needs_collection = True
 
     def release_all(self):
-        self.release_model()
-        self.release_asr()
+        try:
+            self.release_model()
+        finally:
+            # A failed optional cache hook must not retain the detached ASR.
+            self.release_asr()
 
     def collect_if_needed(self):
         """Collect worker remnants and report an actual main-model release once."""

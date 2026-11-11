@@ -39,7 +39,7 @@ class NormalizationUITests(unittest.TestCase):
         self.modules = patch.dict(sys.modules, {"omnivoice.utils.text": module})
         self.modules.start()
         self.addCleanup(self.modules.stop)
-        self.frame = Mock(cfg={"normalize_text": True})
+        self.frame = Mock(cfg={"normalize_text": True}, _closing=False, _close_requested=False)
         self.frame._.side_effect = lambda key: translate(self.locales, "pl", key)
         self.frame._CanUseModel.return_value = True
         self.frame.combo_presets.GetSelection.return_value = -1

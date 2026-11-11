@@ -1,12 +1,15 @@
 """Exercise real GUI handlers without wx/GPU imports or timing-dependent threads."""
 
 import ast
+import gc
 import unittest
+import weakref
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, call
 
 from omnisonic.operations import OperationState
+from omnisonic.model_lifecycle import ModelLifecycle
 from omnisonic.validation import normalize_pasted_path
 
 
@@ -25,7 +28,13 @@ class DispatchTests(unittest.TestCase):
         source = ast.parse(
             (Path(__file__).resolve().parents[1] / "omnisonic/app.py").read_text(encoding="utf-8")
         )
-        handlers = {"RunOperation", "EndOperation", "OnStopOperation", "OnCloseWindow"}
+        handlers = {
+            "RunOperation",
+            "EndOperation",
+            "OnStopOperation",
+            "OnCloseWindow",
+            "_FinishRequestedClose",
+        }
         methods = [
             node
             for node in ast.walk(source)
@@ -35,6 +44,12 @@ class DispatchTests(unittest.TestCase):
         self.state = OperationState()
         self.frame = SimpleNamespace(
             current_op=self.state,
+            _close_requested=False,
+            _confirming_close=False,
+            _auto_reference_pending=False,
+            Close=Mock(),
+            IsBeingDeleted=Mock(return_value=False),
+            _closing=False,
             cfg={"show_progress": True},
             prog_timer=Mock(),
             gauge=Mock(),
@@ -112,6 +127,46 @@ class DispatchTests(unittest.TestCase):
         event.Veto.assert_called_once()
         self.assertIsNone(self.frame.current_op)
         self.assertFalse(self.state.cancel_flag)
+
+    def test_confirmed_busy_close_cancels_then_closes_after_gui_completion(self):
+        self.wx.MessageDialog.return_value.ShowModal.return_value = self.wx.ID_YES
+        self.frame.OnCloseWindow(Mock())
+        self.assertTrue(self.state.cancel_flag)
+        self.assertTrue(self.frame._close_requested)
+        self.frame.Close.assert_not_called()
+        self.state.finished_event.set()
+        self.frame.EndOperation(self.state, None)
+        self.assertIsNone(self.frame.current_op)
+        self.wx.CallAfter.assert_called_once_with(self.frame._FinishRequestedClose)
+        self.frame._set_operation_controls_enabled.assert_called_with(False)
+
+    def test_declined_busy_close_does_not_cancel_or_schedule_exit(self):
+        self.wx.MessageDialog.return_value.ShowModal.return_value = 0
+        self.frame.OnCloseWindow(Mock())
+        self.assertFalse(self.state.cancel_flag)
+        self.assertFalse(self.frame._close_requested)
+        self.wx.CallAfter.assert_not_called()
+
+    def test_close_completed_inside_confirmation_is_still_scheduled(self):
+        self.wx.MessageDialog.return_value.ShowModal.side_effect = self.finish_during_confirmation
+        self.frame.OnCloseWindow(Mock())
+        self.assertTrue(self.frame._close_requested)
+        self.assertIsNone(self.frame.current_op)
+        self.wx.CallAfter.assert_called_once_with(self.frame._FinishRequestedClose)
+
+    def test_pending_close_blocks_new_work_after_gui_completion(self):
+        self.frame.current_op = None
+        self.frame._close_requested = True
+        self.assertIsNone(self.start())
+        self.dialog.assert_not_called()
+
+    def test_pending_close_is_scheduled_even_if_completion_raises(self):
+        self.frame._close_requested = True
+        self.frame._complete_operation.side_effect = ValueError("Synthetic completion failure")
+        with self.assertRaisesRegex(ValueError, "Synthetic completion failure"):
+            self.frame.EndOperation(self.state, None)
+        self.assertIsNone(self.frame.current_op)
+        self.wx.CallAfter.assert_called_once_with(self.frame._FinishRequestedClose)
 
     def test_modal_branch_uses_same_completion_barrier(self):
         self.frame.current_op = None
@@ -383,7 +438,7 @@ class CompletionFocusTests(unittest.TestCase):
 
 class FrameLifecycleTests(unittest.TestCase):
     def setUp(self):
-        self.wx = Mock(ID_YES=1, YES_NO=2, ICON_QUESTION=4)
+        self.wx = Mock(ID_YES=1, YES_NO=2, ICON_QUESTION=4, OK=8, ICON_ERROR=16)
         self.wx.GetTopLevelWindows.return_value = []
         self.save = Mock()
         namespace = {
@@ -391,11 +446,12 @@ class FrameLifecycleTests(unittest.TestCase):
             "SaveBasicConfig": self.save,
             "RECORDED_AUDIO_FILE": "unused.wav",
             "os": Mock(),
+            "logging": Mock(),
         }
         source = ast.parse(
             (Path(__file__).resolve().parents[1] / "omnisonic/app.py").read_text(encoding="utf-8")
         )
-        handlers = {"AutoLoadModel", "OnCloseWindow"}
+        handlers = {"AutoLoadModel", "OnCloseWindow", "_FinishRequestedClose"}
         methods = [
             node
             for node in ast.walk(source)
@@ -408,6 +464,9 @@ class FrameLifecycleTests(unittest.TestCase):
             cfg={"warn_exit": False, "remember_ai_settings": False, "clean_temp": False},
             _closing=False,
             _confirming_close=False,
+            _close_requested=False,
+            _models=Mock(),
+            _set_operation_controls_enabled=Mock(),
             _autoload_timer=Mock(),
             _reference_timer=Mock(),
             IsBeingDeleted=Mock(return_value=False),
@@ -415,6 +474,7 @@ class FrameLifecycleTests(unittest.TestCase):
             _CloseRecording=Mock(),
             OnStopAudio=Mock(),
             Destroy=Mock(),
+            Close=Mock(),
             Log=Mock(),
             _=lambda key: key,
         )
@@ -442,6 +502,111 @@ class FrameLifecycleTests(unittest.TestCase):
         self.frame.Destroy.assert_called_once()
         self.frame.AutoLoadModel()
         self.frame.OnToggleModel.assert_not_called()
+
+    def test_close_releases_models_and_audio_before_destroying_native_window(self):
+        class Resource:
+            _asr_pipe = None
+
+            def release_inference_caches(self):
+                pass
+
+        runtime = ModelLifecycle(None, gc.collect)
+        runtime.model = Resource()
+        runtime.model._asr_pipe = Resource()
+        self.frame._models = runtime
+        self.frame.audio_data = Resource()
+        self.frame.ref_audio_data = Resource()
+        refs = [
+            weakref.ref(runtime.model),
+            weakref.ref(runtime.model._asr_pipe),
+            weakref.ref(self.frame.audio_data),
+            weakref.ref(self.frame.ref_audio_data),
+        ]
+
+        def destroyed():
+            self.assertTrue(all(ref() is None for ref in refs))
+            self.assertIsNone(runtime.model)
+            self.assertIsNone(runtime.asr_pipe)
+
+        self.frame.Destroy.side_effect = destroyed
+        self.frame.OnCloseWindow(Mock())
+        self.frame.Destroy.assert_called_once()
+
+    def test_rejected_close_never_unloads_models(self):
+        self.frame.cfg["warn_exit"] = True
+        self.wx.MessageDialog.return_value.ShowModal.return_value = 0
+        self.frame.OnCloseWindow(Mock())
+        self.frame._models.release_all.assert_not_called()
+        self.frame._models.collect_if_needed.assert_not_called()
+        self.frame.Destroy.assert_not_called()
+
+    def test_save_failure_keeps_window_and_models_available(self):
+        self.save.side_effect = OSError("Synthetic settings failure")
+        self.frame.OnCloseWindow(Mock())
+        self.frame._models.release_all.assert_not_called()
+        self.frame.Destroy.assert_not_called()
+        self.assertFalse(self.frame._closing)
+
+    def test_pending_close_skips_duplicate_confirmation(self):
+        self.frame.cfg["warn_exit"] = True
+        self.frame._close_requested = True
+        self.frame.OnCloseWindow(Mock())
+        self.wx.MessageDialog.assert_not_called()
+        self.frame.Destroy.assert_called_once()
+
+    def test_pending_close_save_failure_clears_intent_and_enables_retry(self):
+        self.frame._close_requested = True
+        self.save.side_effect = OSError("Synthetic settings failure")
+        self.frame.OnCloseWindow(Mock())
+        self.assertFalse(self.frame._close_requested)
+        self.frame._set_operation_controls_enabled.assert_called_once_with(True)
+        self.frame.Destroy.assert_not_called()
+
+    def test_pending_close_blocks_automatic_model_load(self):
+        self.frame._close_requested = True
+        self.frame.AutoLoadModel()
+        self.frame.OnToggleModel.assert_not_called()
+        self.wx.CallLater.assert_not_called()
+
+    def test_queued_close_ignores_deleted_busy_or_no_longer_requested_frame(self):
+        for condition in ("deleted", "busy", "closed", "cancelled"):
+            with self.subTest(condition=condition):
+                self.setUp()
+                self.frame._close_requested = True
+                if condition == "deleted":
+                    self.frame.IsBeingDeleted.return_value = True
+                elif condition == "busy":
+                    self.frame.current_op = OperationState()
+                elif condition == "closed":
+                    self.frame._closing = True
+                else:
+                    self.frame._close_requested = False
+                self.frame._FinishRequestedClose()
+                self.frame.Close.assert_not_called()
+
+    def test_duplicate_queued_close_never_closes_the_native_window_twice(self):
+        self.frame._close_requested = True
+        self.frame.Close.side_effect = lambda: setattr(self.frame, "_closing", True)
+        self.frame._FinishRequestedClose()
+        self.frame._FinishRequestedClose()
+        self.frame.Close.assert_called_once()
+
+    def test_cleanup_failure_does_not_skip_remaining_release_or_native_destroy(self):
+        for failing in ("timer", "recording", "playback", "release", "collect"):
+            with self.subTest(failing=failing):
+                self.setUp()
+                targets = {
+                    "timer": self.frame._autoload_timer.Stop,
+                    "recording": self.frame._CloseRecording,
+                    "playback": self.frame.OnStopAudio,
+                    "release": self.frame._models.release_all,
+                    "collect": self.frame._models.collect_if_needed,
+                }
+                targets[failing].side_effect = RuntimeError("Synthetic cleanup failure")
+                self.frame.OnCloseWindow(Mock())
+                self.frame._models.release_all.assert_called_once()
+                self.frame._models.collect_if_needed.assert_called_once()
+                self.frame.Destroy.assert_called_once()
 
     def test_autoload_does_not_access_deleted_window(self):
         self.frame.IsBeingDeleted.return_value = True

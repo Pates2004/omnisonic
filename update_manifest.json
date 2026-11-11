@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "algorithm": "sha256-lf",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "files": [
     {
       "path": ".gitattributes",
@@ -33,7 +33,7 @@
     },
     {
       "path": ".github/workflows/quality.yml",
-      "sha256": "814bdda963a27d43ad5fd40caea955fb6b614e841756920f14d79a032a2ca94b"
+      "sha256": "b4b78e24fe3daceffc568a0c61232d0b30666d7b120bb17ada79abaa090a4dd7"
     },
     {
       "path": ".github/workflows/stale.yml",
@@ -181,11 +181,11 @@
     },
     {
       "path": "langs/en.lng",
-      "sha256": "d6bc33e3ee628d7a473bbd15476074e5251486d60e452fb185e53684e9c40417"
+      "sha256": "2607991a275447c23de4bf0e1eaa9eaa98446766423528055672fcb172ce788d"
     },
     {
       "path": "langs/pl.lng",
-      "sha256": "126ec4f45b63ba8667a3fbf887611dfaab830d768730f2d9a24ec80f31718861"
+      "sha256": "b71d1847e81182e319cf9a0ab71c95ad42439b41a1d695a296e6a5e1d89c5335"
     },
     {
       "path": "LICENSE",
@@ -193,7 +193,7 @@
     },
     {
       "path": "omnisonic/__init__.py",
-      "sha256": "d3dd4e738d5242588313089048d30c5c3d8423e4f73982948373a522e8127b5d"
+      "sha256": "04e1636c6c2fa7c998b990d8b7ae93cd5e17ed2e288e0a7ca19574cf6d043b4a"
     },
     {
       "path": "omnisonic/accelerator.py",
@@ -201,7 +201,7 @@
     },
     {
       "path": "omnisonic/app.py",
-      "sha256": "f43bd690a28178cb4a143155b75579600313439285eda5cb928a0edcc7e5d6b2"
+      "sha256": "bdd119abe5da118e999c3c4c8b1549e96e7c0122dc390c9f80cb994a6ac966ac"
     },
     {
       "path": "omnisonic/batch.py",
@@ -209,7 +209,7 @@
     },
     {
       "path": "omnisonic/batch_ui.py",
-      "sha256": "a1ba9b56cf244ce2e17a973441365566594e9428dc1591e538b85ddbffebb4fa"
+      "sha256": "672e3dacfa5051b290498ba403bdc76c3c59bb6b92f2ea1a9316711e15680064"
     },
     {
       "path": "omnisonic/config.py",
@@ -220,12 +220,16 @@
       "sha256": "9759c0c5ec1ee59541f72cce148dd73a7c80633b17f223255cc2bc702a1ae277"
     },
     {
+      "path": "omnisonic/help_dialogs.py",
+      "sha256": "70de487b8f0bc77c6500ad954bdc1d21ccf75c8e2bc95f3a3a942251dab44799"
+    },
+    {
       "path": "omnisonic/i18n.py",
       "sha256": "b7132bfd31ce41e6606f2d59d340cca2c087ae34ea37295fb5398776e5d967cb"
     },
     {
       "path": "omnisonic/model_lifecycle.py",
-      "sha256": "0f392e03d73e1e12b1576911a31e120a50adf6fde21d9f90e8c455ca21bae78a"
+      "sha256": "2a0ab2779eee0eb69c8194ec49aba71a857e5513fbb2ad3c1fb1021a44772793"
     },
     {
       "path": "omnisonic/operations.py",
@@ -477,11 +481,11 @@
     },
     {
       "path": "pyproject.toml",
-      "sha256": "61f21cfef875c0633766c316610a83662b6b34009e1b488d97a9e2c6b8f7b2b3"
+      "sha256": "bcd878080ed100c98aafb4bc93f6cadee446f1b0b4dc2548c0d37fb69db38ef8"
     },
     {
       "path": "README.md",
-      "sha256": "3eb474719fd1c5881e2c90c9be9be5b2c0936cf98fb135b761144799bbbcd630"
+      "sha256": "af4ef54de4023ef1484b7998d90dfb984b27b5f8aa5668f36dbd357ad406f27c"
     },
     {
       "path": "requirements-desktop.txt",
@@ -512,6 +516,10 @@
       "sha256": "b089d2a290fc58221d31d45f096ca6986e5f75304ad47456797641140fc101fb"
     },
     {
+      "path": "tests/smoke_custom_batch_ui.py",
+      "sha256": "a37ccb47e185a9a8f91b30aed444bb35f359ac7d52cb9d911bee19d32d82fd74"
+    },
+    {
       "path": "tests/smoke_desktop_workflow.py",
       "sha256": "2b6927e99643966bce453eaac11ff3bf6a4b932f9965d5d330fa532e6f919ef8"
     },
@@ -521,7 +529,7 @@
     },
     {
       "path": "tests/smoke_frame_lifecycle.py",
-      "sha256": "c5914383015f837d9b73d7b085093ad569cd10c00e41d88730bcb33c4d64094e"
+      "sha256": "ba187507e5540d59da52aeb9f16220b9068a1b062e0273253053b1f9b047b9d3"
     },
     {
       "path": "tests/smoke_generation_seed.py",
@@ -588,6 +596,10 @@
       "sha256": "9e9c08f11064f78abf8dff3c937ad33c9050605b9d8dc0dba7ea84c8718559d4"
     },
     {
+      "path": "tests/smoke_tag_help.py",
+      "sha256": "6f3cd24744d018a849811f63afc8b1cef0b4eaf2b8ccd53e25ceb5d2173bbb6b"
+    },
+    {
       "path": "tests/smoke_theme_ui.py",
       "sha256": "2da696a53c2c6d4535202468b2eccd86a0e014b3d209533841aeae2057aa8c77"
     },
@@ -614,6 +626,10 @@
     {
       "path": "tests/test_clone_preset_ui.py",
       "sha256": "69737d9d85abe4345b5249f851af63239440125fce95861fcfa8a1225353a2d4"
+    },
+    {
+      "path": "tests/test_custom_batch_ui.py",
+      "sha256": "accc3e6414a5bfc980eedd8d71f3ab083393c2ade2935baade2e1cb124b2380e"
     },
     {
       "path": "tests/test_demo_reference.py",
@@ -689,11 +705,11 @@
     },
     {
       "path": "tests/test_model_lifecycle.py",
-      "sha256": "f9e9b790f05dc2cab9812d4fe82cef9641d9ef177795aeb8709077ec94b32f1f"
+      "sha256": "80dfad506c0ce539ee237b20ef79b4e5c50a90dc932757cc8aa2a22e677ebfcc"
     },
     {
       "path": "tests/test_normalization_ui.py",
-      "sha256": "cb66f306b5432d00575a14eb8c7cc3f16d3d662bb22f402abfdffbeac3acbec3"
+      "sha256": "682587c4112f832f9d5da25809c0198df32f719dfc25554a1dfad9f2e2864425"
     },
     {
       "path": "tests/test_numeric_controls.py",
@@ -701,7 +717,7 @@
     },
     {
       "path": "tests/test_operation_dispatch.py",
-      "sha256": "1e599d44a391ab062431a667d90a90fe1d92d8e0f9b9880af3664f2182d4306d"
+      "sha256": "b448096a4a51a29371a71c6f24bbcd094bc264c1df70f73b41068d3c356d13c5"
     },
     {
       "path": "tests/test_output_paths.py",
@@ -761,7 +777,7 @@
     },
     {
       "path": "tests/test_reference_path_ui.py",
-      "sha256": "6068e4ae05e869e074a0f515f93f9409fb257b4b36f621d44e151d0223f1be1f"
+      "sha256": "c415676a59aabd5120f3f0a566112560e09affadd789a292c53b4c9b9056654d"
     },
     {
       "path": "tests/test_runtime_in_use.ps1",
@@ -782,6 +798,10 @@
     {
       "path": "tests/test_subtitles.py",
       "sha256": "a683abde141392f1d47c005a070d7df7d151219e8dbe980f5a70aa7eb59e885a"
+    },
+    {
+      "path": "tests/test_tag_help.py",
+      "sha256": "98cab37e7df0bfee128c80837d3d8113f8dc4bccfed58628fa47dfe3f5dfa2ff"
     },
     {
       "path": "tests/test_text_chunking.py",

@@ -295,6 +295,17 @@ class ModelLifecycleTests(unittest.TestCase):
         self.runtime.collect_if_needed()
         self.assertTrue(all(ref() is None for ref in self.loaded + self.pipelines))
 
+    def test_failed_cache_cleanup_still_detaches_both_model_owners(self):
+        self.perform({})
+        self.runtime.model.release_inference_caches = Mock(
+            side_effect=RuntimeError("Synthetic cache cleanup failure")
+        )
+        with self.assertRaisesRegex(RuntimeError, "Synthetic cache cleanup failure"):
+            self.runtime.release_all()
+        self.assertIsNone(self.runtime.model)
+        self.assertIsNone(self.runtime.asr_pipe)
+        self.assertTrue(self.runtime.needs_collection)
+
     def test_empty_runtime_cleanup_does_not_report_model_release(self):
         self.runtime.release_all()
         self.assertTrue(self.runtime.needs_collection)

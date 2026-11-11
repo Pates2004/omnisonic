@@ -307,7 +307,7 @@
     "batch_file": "Source file",
     "batch_status": "Status",
     "batch_result": "Output file or error",
-    "batch_mode": "Voice mode (settings from its main tab):",
+    "batch_mode": "Voice settings source:",
     "batch_output": "Output folder (a new batch subfolder will be created):",
     "batch_start": "Process files",
     "batch_text_filter": "Text and subtitles (*.txt;*.md;*.srt;*.vtt)|*.txt;*.md;*.srt;*.vtt|Text files (*.txt;*.md)|*.txt;*.md|Subtitles (*.srt;*.vtt)|*.srt;*.vtt",
@@ -370,5 +370,9 @@
     "update_downloading": "Downloading the verified OmniSonic source update...",
     "update_unavailable": "Update not applied; using the current installation. Details: {0}",
     "update_restart_failed": "The updated source is installed, but the launcher could not restart. Start OmniSonic again; recovery files have been retained. Details: {0}",
-    "update_recovery_required": "Source update recovery must finish before OmniSonic can start. Recovery files: {0}. Details: {1}"
+    "update_recovery_required": "Source update recovery must finish before OmniSonic can start. Recovery files: {0}. Details: {1}",
+    "btn_close": "Close",
+    "batch_custom": "Custom",
+    "batch_custom_voice": "Custom voice mode:",
+    "batch_invalid_mode": "Choose a valid batch voice mode."
 }

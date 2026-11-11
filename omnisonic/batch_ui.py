@@ -47,6 +47,7 @@ class BatchTabMixin:
         self.batch_preserve_structure.SetValue(True)
         layout.Add(self.batch_preserve_structure, 0, wx.ALL, 5)
         self.batch_list = wx.ListCtrl(tab, style=wx.LC_REPORT)
+        self.batch_list.SetMinSize((-1, 130))
         self.batch_list.SetName(self._("batch_queue"))
         for index, (label, width) in enumerate(
             (("batch_file", 330), ("batch_status", 140), ("batch_result", 420))
@@ -62,12 +63,117 @@ class BatchTabMixin:
             5,
         )
         self.batch_mode = wx.Choice(
-            tab, choices=[self._("tab_clone"), self._("tab_design"), self._("tab_auto")]
+            tab,
+            choices=[
+                self._("tab_clone"),
+                self._("tab_design"),
+                self._("tab_auto"),
+                self._("batch_custom"),
+            ],
         )
-        self.batch_mode.SetSelection(0)
+        self.batch_mode.SetSelection(3)
         self.batch_mode.SetName(self._("batch_mode"))
+        self.batch_mode.Bind(wx.EVT_CHOICE, self.OnBatchModeChanged)
         modes.Add(self.batch_mode, 1)
         layout.Add(modes, 0, wx.EXPAND | wx.ALL, 5)
+        self.batch_custom_panel = wx.Panel(tab)
+        custom = wx.BoxSizer(wx.VERTICAL)
+        custom.Add(
+            wx.StaticText(self.batch_custom_panel, label=self._("batch_custom_voice")),
+            0,
+            wx.LEFT | wx.TOP,
+            5,
+        )
+        self.batch_custom_voice = wx.Choice(
+            self.batch_custom_panel,
+            choices=[self._("tab_clone"), self._("tab_design"), self._("tab_auto")],
+        )
+        self.batch_custom_voice.SetName(self._("batch_custom_voice"))
+        self.batch_custom_voice.SetSelection(0)
+        self.batch_custom_voice.Bind(wx.EVT_CHOICE, self.OnBatchCustomVoiceChanged)
+        custom.Add(self.batch_custom_voice, 0, wx.EXPAND | wx.ALL, 5)
+
+        self.batch_custom_reference_panel = wx.Panel(self.batch_custom_panel)
+        reference = wx.BoxSizer(wx.VERTICAL)
+        reference.Add(
+            wx.StaticText(self.batch_custom_reference_panel, label=self._("preset_list")),
+            0,
+            wx.LEFT | wx.TOP,
+            5,
+        )
+        presets = wx.BoxSizer(wx.HORIZONTAL)
+        self.batch_custom_preset = wx.ComboBox(
+            self.batch_custom_reference_panel, style=wx.CB_READONLY
+        )
+        self.batch_custom_preset.SetName(self._("preset_list"))
+        self.batch_custom_preset.Bind(wx.EVT_COMBOBOX, self.OnBatchCustomVoiceChanged)
+        presets.Add(self.batch_custom_preset, 1, wx.RIGHT, 5)
+        self.btn_batch_preset_refresh = wx.Button(
+            self.batch_custom_reference_panel, label=self._("refresh")
+        )
+        self.btn_batch_preset_refresh.Bind(wx.EVT_BUTTON, lambda event: self.RefreshPresets())
+        presets.Add(self.btn_batch_preset_refresh, 0)
+        reference.Add(presets, 0, wx.EXPAND | wx.ALL, 5)
+        reference.Add(
+            wx.StaticText(self.batch_custom_reference_panel, label=self._("ref_audio")),
+            0,
+            wx.LEFT | wx.TOP,
+            5,
+        )
+        audio = wx.BoxSizer(wx.HORIZONTAL)
+        self.batch_custom_audio = wx.TextCtrl(self.batch_custom_reference_panel)
+        self.batch_custom_audio.SetName(self._("ref_audio"))
+        self.batch_custom_audio.Bind(wx.EVT_TEXT, self.OnBatchReferenceChanged)
+        audio.Add(self.batch_custom_audio, 1, wx.RIGHT, 5)
+        self.btn_batch_ref_browse = wx.Button(
+            self.batch_custom_reference_panel, label=self._("browse")
+        )
+        self.btn_batch_ref_browse.Bind(
+            wx.EVT_BUTTON, lambda event: self.BrowseFor(self.batch_custom_audio)
+        )
+        audio.Add(self.btn_batch_ref_browse, 0)
+        reference.Add(audio, 0, wx.EXPAND | wx.ALL, 5)
+        reference.Add(
+            wx.StaticText(self.batch_custom_reference_panel, label=self._("ref_text")),
+            0,
+            wx.LEFT | wx.TOP,
+            5,
+        )
+        self.batch_custom_text = wx.TextCtrl(
+            self.batch_custom_reference_panel, style=wx.TE_MULTILINE, size=(-1, 50)
+        )
+        self.batch_custom_text.SetName(self._("ref_text"))
+        reference.Add(self.batch_custom_text, 0, wx.EXPAND | wx.ALL, 5)
+        self.batch_custom_reference_panel.SetSizer(reference)
+        custom.Add(self.batch_custom_reference_panel, 0, wx.EXPAND)
+
+        custom.Add(
+            wx.StaticText(self.batch_custom_panel, label=self._("lang_select")),
+            0,
+            wx.LEFT | wx.TOP,
+            5,
+        )
+        self.batch_custom_language = wx.ComboBox(
+            self.batch_custom_panel, choices=self.clone_lang.GetItems(), style=wx.CB_READONLY
+        )
+        self.batch_custom_language.SetName(self._("lang_select"))
+        self.batch_custom_language.SetValue("Auto")
+        custom.Add(self.batch_custom_language, 0, wx.EXPAND | wx.ALL, 5)
+        self.batch_custom_instruction_panel = wx.Panel(self.batch_custom_panel)
+        instructions = wx.BoxSizer(wx.VERTICAL)
+        instructions.Add(
+            wx.StaticText(self.batch_custom_instruction_panel, label=self._("clone_instruct")),
+            0,
+            wx.LEFT | wx.TOP,
+            5,
+        )
+        self.batch_custom_instruction = wx.TextCtrl(self.batch_custom_instruction_panel)
+        self.batch_custom_instruction.SetName(self._("clone_instruct"))
+        instructions.Add(self.batch_custom_instruction, 0, wx.EXPAND | wx.ALL, 5)
+        self.batch_custom_instruction_panel.SetSizer(instructions)
+        custom.Add(self.batch_custom_instruction_panel, 0, wx.EXPAND)
+        self.batch_custom_panel.SetSizer(custom)
+        layout.Add(self.batch_custom_panel, 0, wx.EXPAND | wx.ALL, 5)
         layout.Add(wx.StaticText(tab, label=self._("batch_output")), 0, wx.LEFT | wx.TOP, 5)
         output = wx.BoxSizer(wx.HORIZONTAL)
         self.batch_output = wx.TextCtrl(tab, value=self.cfg["generated_audio_directory"])
@@ -81,6 +187,33 @@ class BatchTabMixin:
         self.btn_gen_batch.Bind(wx.EVT_BUTTON, self.OnGenBatch)
         layout.Add(self.btn_gen_batch, 0, wx.ALL, 5)
         tab.SetSizer(layout)
+        tab.SetupScrolling(scroll_x=False)
+        self._UpdateBatchCustomControls()
+
+    def OnBatchModeChanged(self, event):
+        self._UpdateBatchCustomControls()
+
+    def OnBatchCustomVoiceChanged(self, event):
+        self._UpdateBatchCustomControls()
+
+    def OnBatchReferenceChanged(self, event):
+        # A transcript belongs to its own source, not the Clone tab's file.
+        self.batch_custom_text.ChangeValue("")
+        event.Skip()
+
+    def _UpdateBatchCustomControls(self):
+        self.batch_custom_panel.Show(self.batch_mode.GetSelection() == 3)
+        voice = self.batch_custom_voice.GetSelection()
+        self.batch_custom_reference_panel.Show(voice == 0)
+        self.batch_custom_instruction_panel.Show(voice != 2)
+        selection = self.batch_custom_preset.GetSelection()
+        preset = (
+            self.batch_custom_preset.GetClientData(selection) if selection != wx.NOT_FOUND else None
+        )
+        for control in (self.batch_custom_audio, self.batch_custom_text, self.btn_batch_ref_browse):
+            control.Enable(not preset)
+        self.tab_batch.Layout()
+        self.tab_batch.FitInside()
 
     def OnBatchAddFiles(self, event):
         with wx.FileDialog(
@@ -187,9 +320,17 @@ class BatchTabMixin:
         if not indices:
             wx.MessageBox(self._("batch_no_files"), self._("info_title"), parent=self)
             return
-        mode = self.batch_mode.GetSelection()
-        languages = (self.clone_lang, self.design_lang, self.auto_lang)
-        language = languages[mode].GetValue()
+        source = self.batch_mode.GetSelection()
+        custom = source == 3
+        mode = self.batch_custom_voice.GetSelection() if custom else source
+        if mode not in (0, 1, 2):
+            wx.MessageBox(self._("batch_invalid_mode"), self._("error_title"), parent=self)
+            return
+        language = (
+            self.batch_custom_language.GetValue()
+            if custom
+            else (self.clone_lang, self.design_lang, self.auto_lang)[mode].GetValue()
+        )
         if not self._CheckTextNormalization(language):
             return
         kwargs = {
@@ -204,10 +345,9 @@ class BatchTabMixin:
             kwargs["speed"] = self.spin_speed.GetValue()
         prompt_source = None
         if mode == 0:
-            selection = self.combo_presets.GetSelection()
-            preset = (
-                self.combo_presets.GetClientData(selection) if selection != wx.NOT_FOUND else None
-            )
+            presets = self.batch_custom_preset if custom else self.combo_presets
+            selection = presets.GetSelection()
+            preset = presets.GetClientData(selection) if selection != wx.NOT_FOUND else None
             if preset:
                 try:
                     prompt_source = (
@@ -225,12 +365,21 @@ class BatchTabMixin:
                     )
                     return
             else:
-                reference = normalize_pasted_path(self.clone_ref_audio.GetValue())
+                reference = normalize_pasted_path(
+                    (self.batch_custom_audio if custom else self.clone_ref_audio).GetValue()
+                )
                 if not reference or not Path(reference).is_file():
                     wx.MessageBox(self._("err_no_audio_preset"), self._("error_title"), parent=self)
                     return
-                prompt_source = (None, reference, self.clone_ref_text.GetValue().strip() or None)
-            instruction = self.clone_instruct.GetValue().strip()
+                transcript = self.batch_custom_text if custom else self.clone_ref_text
+                prompt_source = (None, reference, transcript.GetValue().strip() or None)
+            instruction = (
+                (self.batch_custom_instruction if custom else self.clone_instruct)
+                .GetValue()
+                .strip()
+            )
+        elif mode == 1 and custom:
+            instruction = self.batch_custom_instruction.GetValue().strip()
         elif mode == 1:
             instructions = []
             for combo in self.design_combos:

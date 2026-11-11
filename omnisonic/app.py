@@ -29,6 +29,7 @@ from .config import (
 )
 from .batch_ui import BatchTabMixin
 from .i18n import load_locales, translate
+from .help_dialogs import ReadOnlyTextDialog
 from .files import atomic_write, write_numbered_audio
 from .operations import OperationState, execute_worker
 from .model_lifecycle import ModelLifecycle
@@ -1757,6 +1758,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self._auto_reference_pending = False
         self._reference_timer = None
         self._closing = False
+        self._close_requested = False
         self._confirming_close = False
         self._autoload_timer = None
 
@@ -1951,7 +1953,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.tab_adv = scrolled.ScrolledPanel(self.notebook)
 
         self.tab_auto = wx.Panel(self.notebook)
-        self.tab_batch = wx.Panel(self.notebook)
+        self.tab_batch = scrolled.ScrolledPanel(self.notebook)
 
         self.notebook.AddPage(self.tab_clone, self._("tab_clone"))
         self.notebook.AddPage(self.tab_presets, self._("tab_presets"))
@@ -2096,6 +2098,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             "btn_batch_browse",
             "batch_list",
             "batch_mode",
+            "batch_custom_panel",
             "batch_output",
             "batch_recursive",
             "batch_preserve_structure",
@@ -2135,6 +2138,12 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
     def _complete_operation(self, state, success_callback):
         was_released = self._models.collect_if_needed() and self.model is None
+        if getattr(self, "_close_requested", False):
+            # Close after the completion barrier, not from the worker. Do not
+            # open result/error dialogs or enqueue another automatic operation.
+            if state.error is not None:
+                logging.error("Operation failed while waiting to close: %s", state.error)
+            return
         self.btn_toggle_model.SetLabel(self._("unload_model" if self.model else "load_model"))
         self.sample_rate = self._models.sampling_rate
         if was_released:
@@ -2157,6 +2166,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         wx.CallAfter(self._MaybeAutoTranscribeReference)
 
     def RunOperation(self, title_key, msg_key, worker_func, *args, success_callback=None):
+        if getattr(self, "_closing", False) or getattr(self, "_close_requested", False):
+            return None
         # Worker completion is not GUI completion: its result/callback can still
         # be queued, or displaying a dialog that dispatches more wx events.
         if self.current_op is not None:
@@ -2215,7 +2226,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             self._complete_operation(state, success_callback)
         finally:
             self.current_op = None
-            self._set_operation_controls_enabled(True)
+            close_requested = getattr(self, "_close_requested", False)
+            self._set_operation_controls_enabled(not close_requested)
+            if close_requested:
+                wx.CallAfter(self._FinishRequestedClose)
 
     def OnOpenSettings(self, event):
         dlg = SettingsDialog(self, is_first_run=False, current_cfg=self.cfg.copy())
@@ -2259,12 +2273,26 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 wx.MessageBox(self._("model_reload_required"), self._("info_title"))
         dlg.Destroy()
 
+    def _FinishRequestedClose(self):
+        if (
+            not self
+            or self.IsBeingDeleted()
+            or getattr(self, "_closing", False)
+            or not getattr(self, "_close_requested", False)
+            or self.current_op is not None
+        ):
+            return
+        self.Close()
+
     def OnCloseWindow(self, event):
         if getattr(self, "_closing", False) or getattr(self, "_confirming_close", False):
             event.Veto()
             return
         state = self.current_op
         if state is not None:
+            if getattr(self, "_close_requested", False):
+                event.Veto()
+                return
             dlg = wx.MessageDialog(
                 self, self._("close_busy"), self._("warning_title"), wx.YES_NO | wx.ICON_QUESTION
             )
@@ -2274,16 +2302,25 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             finally:
                 dlg.Destroy()
                 self._confirming_close = False
-            if confirmed and self.current_op is state and not state.finished:
-                state.request_cancel()
-                self.Log(self._("cancel_pending"))
+            if confirmed:
+                self._close_requested = True
+                self._auto_reference_pending = False
+                active = self.current_op
+                if active is not None and not active.finished:
+                    active.request_cancel()
+                    self.Log(self._("cancel_pending"))
+                elif active is None:
+                    # Completion can run inside the confirmation's modal loop.
+                    wx.CallAfter(self._FinishRequestedClose)
             event.Veto()
             return
 
         recording_busy = getattr(self, "rec_stream", None) is not None or bool(
             getattr(self, "rec_data", ())
         )
-        if recording_busy or self.cfg.get("warn_exit", True):
+        if (recording_busy or self.cfg.get("warn_exit", True)) and not getattr(
+            self, "_close_requested", False
+        ):
             dlg = wx.MessageDialog(
                 self,
                 self._("record_discard_close" if recording_busy else "close_warn"),
@@ -2338,13 +2375,25 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 self._("error_title"),
                 wx.OK | wx.ICON_ERROR,
             )
+            self._close_requested = False
+            self._set_operation_controls_enabled(True)
             event.Veto()
             return
 
         self._closing = True
-        if self._autoload_timer is not None:
-            self._autoload_timer.Stop()
-            self._autoload_timer = None
+        self._auto_reference_pending = False
+        timers = ["_autoload_timer", "_reference_timer", "prog_timer", "play_timer"]
+        reference_button = getattr(self, "btn_play_ref", None)
+        if reference_button is not None:
+            timers.append(f"timer_{id(reference_button)}")
+        for name in timers:
+            timer = getattr(self, name, None)
+            setattr(self, name, None)
+            if timer is not None:
+                try:
+                    timer.Stop()
+                except Exception:
+                    logging.exception("Could not stop %s while closing", name)
         if self.cfg.get("clean_temp", True):
             if os.path.exists(RECORDED_AUDIO_FILE):
                 try:
@@ -2358,9 +2407,20 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             logging.warning("Could not close recording stream: %s", exc)
         self.rec_data = []
 
-        self.OnStopAudio(None)
-        if self._reference_timer is not None:
-            self._reference_timer.Stop()
+        try:
+            self.OnStopAudio(None)
+        except Exception:
+            logging.exception("Could not stop playback while closing")
+        self.audio_data = None
+        self.ref_audio_data = None
+        try:
+            self._models.release_all()
+        except Exception:
+            logging.exception("Could not clear all inference caches while closing")
+        try:
+            self._models.collect_if_needed()
+        except Exception:
+            logging.exception("Could not collect model memory while closing")
         self.Destroy()
 
     def SetupCloneTab(self, tab):
@@ -2767,7 +2827,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         event.Skip()
 
     def _MaybeAutoTranscribeReference(self):
-        if not self or self.IsBeingDeleted() or not self._auto_reference_pending:
+        if (
+            not self
+            or self.IsBeingDeleted()
+            or getattr(self, "_closing", False)
+            or getattr(self, "_close_requested", False)
+            or not self._auto_reference_pending
+        ):
             return
         if not self.cfg.get("auto_transcribe_reference", False):
             self._auto_reference_pending = False
@@ -2847,6 +2913,14 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         selection = self.combo_presets.GetSelection()
         if selection != wx.NOT_FOUND:
             previous_active = self.combo_presets.GetClientData(selection)
+        batch_presets = getattr(self, "batch_custom_preset", None)
+        previous_batch = None
+        if batch_presets is not None:
+            selection = batch_presets.GetSelection()
+            if selection != wx.NOT_FOUND:
+                previous_batch = batch_presets.GetClientData(selection)
+            batch_presets.Clear()
+            batch_presets.Append(self._("no_preset"), None)
         previous_managed = None
         if hasattr(self, "list_presets"):
             selection = self.list_presets.GetSelection()
@@ -2888,6 +2962,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                     disp = f"{name_only} ({full_path})"
 
                 self.combo_presets.Append(disp, pt)
+                if batch_presets is not None:
+                    batch_presets.Append(disp, pt)
                 if hasattr(self, "list_presets"):
                     self.list_presets.Append(disp, pt)
 
@@ -2898,6 +2974,15 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                     active_selection = index
                     break
         self.combo_presets.SetSelection(active_selection)
+        if batch_presets is not None:
+            batch_selection = 0
+            if previous_batch is not None:
+                for index in range(1, batch_presets.GetCount()):
+                    if batch_presets.GetClientData(index) == previous_batch:
+                        batch_selection = index
+                        break
+            batch_presets.SetSelection(batch_selection)
+            self._UpdateBatchCustomControls()
         if hasattr(self, "list_presets") and self.list_presets.GetCount():
             selection = 0
             if previous_managed:
@@ -2917,7 +3002,12 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             )
 
     def AutoLoadModel(self):
-        if not self or self.IsBeingDeleted() or self._closing:
+        if (
+            not self
+            or self.IsBeingDeleted()
+            or self._closing
+            or getattr(self, "_close_requested", False)
+        ):
             return
         if (
             self._confirming_close
@@ -4136,7 +4226,17 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             self._UpdateRecordingControls(btn)
 
     def OnShowTags(self, event):
-        wx.MessageBox(self._("msg_tags"), self._("title_tags"), wx.OK | wx.ICON_INFORMATION)
+        dialog = ReadOnlyTextDialog(
+            self,
+            self._("title_tags"),
+            self._("msg_tags"),
+            self._("btn_close"),
+            font_size=self.cfg.get("font_size", 10),
+        )
+        try:
+            dialog.ShowModal()
+        finally:
+            dialog.Destroy()
 
     def OnShowSubtitleHelp(self, event):
         wx.MessageBox(

@@ -22,7 +22,7 @@ class ReferencePathTests(unittest.TestCase):
         self.source.write_bytes(b"Synthetic path fixture, never decoded")
         self.quoted = f'  "{self.source}"  '
         self.wx = Mock(NOT_FOUND=-1, OK=1, ICON_ERROR=2)
-        self.frame = Mock(cfg={})
+        self.frame = Mock(cfg={}, _closing=False, _close_requested=False)
         self.frame._.side_effect = lambda key: key
         self.frame._CanUseModel.return_value = True
         self.frame.current_op = None

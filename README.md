@@ -314,6 +314,22 @@ one global checkbox, and the default assignments can be restored at any time.
 `Ctrl+Shift+S` creates a preset from the reference audio currently loaded on
 the **Voice Clone** tab and asks for its name.
 
+**Help > Voice tag list** opens a selectable, read-only multiline field rather
+than a static message box. Read it with the arrow keys, select/copy with
+Ctrl+A/C, and close with Escape or **Close**. The field starts at the beginning
+and follows the app's theme/font. Po polsku: **Pomoc > Lista znaczników głosu**
+ma pole tylko do odczytu, po którym można poruszać się strzałkami i kopiować
+tekst; Escape lub **Zamknij** wraca do poprzedniej kontrolki.
+
+Closing an idle window explicitly releases OmniVoice, Whisper, reference caches
+and audio buffers. Confirming close while an operation is running requests
+cooperative cancellation and closes automatically after that operation finishes;
+it does not forcibly interrupt native GPU work. If settings cannot be saved,
+the window stays open and reports the error. Po polsku: potwierdzenie zamknięcia
+w trakcie pracy anuluje zadanie i zamyka program po jego zakończeniu; trwająca
+operacja GPU może jeszcze potrzebować czasu na powrót. Przy błędzie zapisu
+ustawień okno pozostaje otwarte, zamiast udawać udane zamknięcie.
+
 In the settings dialog, Enter activates **Save** and Escape cancels. Escape
 closes immediately when nothing changed and asks before discarding unsaved
 changes otherwise.
@@ -353,11 +369,33 @@ without BOM) and UTF-16 with BOM are supported; Markdown is read as plain text.
 VTT subtitle files require UTF-8.
 Binary documents such as PDF/DOCX and audio inputs are not treated as text.
 
-Choose Clone, Design, or Automatic mode. The batch uses the voice/preset,
-language/instructions and advanced settings from the corresponding main tab.
-With Clone mode, the same reference prompt is prepared once and reused for the
-whole batch. In Automatic/Design mode the engine can choose a different voice
-for each file; use a cloned preset when speaker consistency is required.
+**Custom** is the default voice-settings source. Choose Clone, Design, or
+Automatic inside the batch tab. Custom Clone has its own preset selector, audio
+file picker and optional reference transcript; its language and voice attribute
+tags are independent of the other tabs. Selecting a preset disables the unused
+audio/transcript fields. Changing the custom audio clears only its own old
+transcript. Refreshing presets preserves the batch and Clone selections
+independently; removing the selected preset returns that selector to new audio.
+Custom inputs are session-only and do not change the Clone tab or its save-preset
+shortcut. The text/subtitle queue remains the material to synthesize; the custom
+audio is a voice reference, not an audio-to-audio conversion queue.
+
+The original Clone, Design, and Automatic settings sources remain available;
+these explicitly borrow voice/preset and language/instructions from their main
+tabs. Advanced generation settings (including speed/duration and seed) are
+shared in every batch mode. With Clone mode, the same reference prompt is
+prepared once and reused for the whole batch. In Automatic/Design mode the
+engine can choose a different voice for each file; use a cloned preset when
+speaker consistency is required.
+
+Po polsku: domyślne **Niestandardowe** pozwala ustawić głos bez przełączania się
+do innych zakładek. Ma własny preset albo plik audio, tekst referencji, język i
+znaczniki cech głosu. Wybór presetu wyłącza nieużywane pola audio i tekstu.
+Zmiana tego audio czyści tylko jego tekst. Te ustawienia obowiązują w bieżącej
+sesji; nie zmieniają Klonowania ani skrótu zapisu presetu. Nadal można świadomie
+wybrać ustawienia z Klonowania, Projektowania lub trybu automatycznego.
+Parametry z Zaawansowanych są wspólne. Nagranie służy jako wzorzec głosu,
+a pliki TXT/Markdown/SRT/VTT w kolejce zawierają treść do wygenerowania.
 
 **Process files** (or **Ctrl+G** while this tab is active) processes files in
 sequence, keeping GPU memory use bounded. Each input produces a separate WAV
