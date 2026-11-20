@@ -374,5 +374,12 @@
     "btn_close": "Zamknij",
     "batch_custom": "Niestandardowe",
     "batch_custom_voice": "Niestandardowy tryb głosu:",
-    "batch_invalid_mode": "Wybierz prawidłowy tryb głosu do przetwarzania masowego."
+    "batch_invalid_mode": "Wybierz prawidłowy tryb głosu do przetwarzania masowego.",
+    "audio_output_device": "Urządzenie wyjściowe odtwarzania:",
+    "audio_output_default": "Domyślne systemowe",
+    "audio_output_missing_item": "{name} ({host}) — niedostępne",
+    "audio_output_unavailable": "Wybrane wyjście {name} ({host}) jest niedostępne lub niejednoznaczne. Wybierz inne urządzenie w Ustawieniach > System. Jeśli dopiero podłączono urządzenie, uruchom ponownie OmniSonic.",
+    "remember_save_directory": "Zapamiętuj ostatni folder z okna Zapisz jako osobno dla wyników i nagrań",
+    "audio_replace_confirm": "Zastąpić istniejący plik {name}?",
+    "audio_directory_remember_failed": "Dźwięk zapisano, ale nie udało się zapamiętać folderu między uruchomieniami: {error}"
 }

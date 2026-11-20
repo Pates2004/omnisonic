@@ -437,7 +437,7 @@ class OmniVoice(PreTrainedModel):
                 audio_tokenizer_path = os.path.join(resolved_path, "audio_tokenizer")
 
                 if not os.path.isdir(audio_tokenizer_path):
-                    audio_tokenizer_path = _resolve_model_path("eustlb/higgs-audio-v2-tokenizer")
+                    audio_tokenizer_path = _resolve_model_path("bosonai/higgs-audio-v2-tokenizer")
 
                 # higgs-audio-v2-tokenizer does not support MPS
                 # (output channels > 65536)

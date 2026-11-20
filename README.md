@@ -308,6 +308,39 @@ The **System** settings tab shows the active backend, device, PyTorch/TorchAudio
 versions, model-loading library versions, CUDA/HIP/XPU state, Python, OS, and RAM. **Copy diagnostics** places a
 report suitable for a bug submission on the clipboard.
 
+In **Settings > System > Playback output device**, choose physical speakers,
+headphones, or a virtual cable. This applies to generated and reference audio,
+not the microphone or other apps. On Windows, prefer the **Windows WASAPI**
+entry for the desired output; it converts the sample rate in shared mode.
+**System default** retains normal PortAudio routing. Choosing a new output
+stops the current playback; the next play uses the new route. A missing saved
+device is reported instead of falling back silently. Restart OmniSonic if a
+device connected during the session is not yet listed.
+
+Po polsku: **Ustawienia > System > Urządzenie wyjściowe odtwarzania** pozwala
+wybrać głośniki, słuchawki lub kabel wirtualny (najlepiej wpis **Windows WASAPI**).
+Wyjście obsługuje odsłuch syntezy i referencji, bez zmiany mikrofonu. Zapisanie
+nowego wyboru zatrzymuje bieżący odsłuch; następne odtworzenie użyje nowego
+wyjścia. Brak zapisanej karty wyświetli błąd. Jeśli nowa karta nie pojawia się
+na liście, uruchom program ponownie.
+
+Generated audio and microphone exports use the first free filename, e.g.
+`generated.wav`, `generated1.wav`, `generated2.wav` or `record.wav`,
+`record1.wav`. Save As recomputes the suggested name in the folder actually
+chosen, including after a concurrent save. To intentionally replace an
+existing file, enter its name explicitly and confirm the warning.
+Enable **Remember the last Save As folder** to remember successful dialog
+saves separately for results and recordings across restarts. Changing an
+explicit folder in Settings resets that category's remembered location.
+Direct autosave still uses the explicit folder from Settings.
+
+Po polsku: wolna nazwa to np. `generated.wav`, `generated1.wav`,
+`generated2.wav` albo `record.wav`, `record1.wav`. Program uzupełnia luki i nie
+nadpisuje plików przy wyborze proponowanej nazwy. Opcja **Zapamiętuj ostatni
+folder z okna Zapisz jako** zachowuje oddzielnie folder wyników i nagrań po
+udanym zapisie, również po ponownym uruchomieniu. Zapis bez pytania nadal
+korzysta z folderu podanego w ustawieniach.
+
 Keyboard shortcuts can be edited on the **Keyboard shortcuts** settings tab.
 Each command can be enabled independently, all shortcuts can be disabled with
 one global checkbox, and the default assignments can be restored at any time.

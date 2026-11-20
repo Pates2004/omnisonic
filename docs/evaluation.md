@@ -15,7 +15,8 @@ Evaluate OmniVoice models with standard TTS metrics: WER (intelligibility), SIM-
 ## Prerequisites
 
 ```bash
-pip install omnivoice[eval]
+# From this repository's root, using the intended Python environment:
+python -m pip install -e ".[eval]"
 # or
 uv sync --extra eval
 ```

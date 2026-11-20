@@ -27,7 +27,7 @@ jobs:
       - name: Verify maintained source manifest
         run: python -B tools/update_manifest.py --check
       - name: Test Clone preset controls and single-waveform denoising
-        run: python -m unittest -v tests.test_clone_preset_ui tests.test_denoise_processor tests.test_update_manifest
+        run: python -m unittest -v tests.test_clone_preset_ui tests.test_denoise_processor tests.test_audio_tokenizer tests.test_update_manifest
       - name: Test custom batch settings and accessible voice tags
         run: python -m unittest -v tests.test_custom_batch_ui tests.test_tag_help
       - name: Test desktop logic

@@ -374,5 +374,12 @@
     "btn_close": "Close",
     "batch_custom": "Custom",
     "batch_custom_voice": "Custom voice mode:",
-    "batch_invalid_mode": "Choose a valid batch voice mode."
+    "batch_invalid_mode": "Choose a valid batch voice mode.",
+    "audio_output_device": "Playback output device:",
+    "audio_output_default": "System default",
+    "audio_output_missing_item": "{name} ({host}) — unavailable",
+    "audio_output_unavailable": "The selected playback device {name} ({host}) is unavailable or ambiguous. Choose another output in Settings > System. If you just connected the device, restart OmniSonic.",
+    "remember_save_directory": "Remember the last Save As folder separately for generated audio and recordings",
+    "audio_replace_confirm": "Replace the existing file {name}?",
+    "audio_directory_remember_failed": "Audio was saved, but its folder could not be remembered across restarts: {error}"
 }

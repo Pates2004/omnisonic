@@ -15,6 +15,7 @@ from .accelerator import (
     format_diagnostics,
     preferred_dtype,
 )
+from .audio_output import OutputDeviceUnavailableError, list_output_devices, playback_options
 from .config import (
     CONFIG_FILE,
     DEFAULT_CONFIG,
@@ -30,7 +31,7 @@ from .config import (
 from .batch_ui import BatchTabMixin
 from .i18n import load_locales, translate
 from .help_dialogs import ReadOnlyTextDialog
-from .files import atomic_write, write_numbered_audio
+from .files import atomic_write, suggest_audio_name, write_named_audio, write_numbered_audio
 from .operations import OperationState, execute_worker
 from .model_lifecycle import ModelLifecycle
 from .randomness import seeded_generation
@@ -871,6 +872,13 @@ class SettingsDialog(wx.Dialog):
             self.chk_hide_console.SetValue(self.cfg.get("hide_console", True))
             vbox_sys.Add(self.chk_hide_console, 0, wx.ALL | wx.EXPAND, 5)
 
+            output_label = self._("audio_output_device")
+            vbox_sys.Add(wx.StaticText(tab_sys, label=output_label), 0, wx.LEFT | wx.TOP, 5)
+            self.choice_output_device = wx.Choice(tab_sys)
+            self.choice_output_device.SetName(output_label)
+            self._populate_audio_outputs()
+            vbox_sys.Add(self.choice_output_device, 0, wx.ALL | wx.EXPAND, 5)
+
             label = wx.StaticText(tab_sys, label=self._("preset_disp_lbl"))
             vbox_sys.Add(label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
             self.cb_preset_disp = wx.ComboBox(
@@ -1011,6 +1019,14 @@ class SettingsDialog(wx.Dialog):
             self.chk_normalize_text.SetName(self._("norm_text_lbl"))
             self.chk_normalize_text.SetValue(self.cfg.get("normalize_text", False))
             vbox_opts.Add(self.chk_normalize_text, 0, wx.ALL | wx.EXPAND, 5)
+
+            label = self._("remember_save_directory")
+            self.chk_remember_save_directory = wx.CheckBox(tab_opts, label=label)
+            self.chk_remember_save_directory.SetName(label)
+            self.chk_remember_save_directory.SetValue(
+                self.cfg.get("remember_save_directory", False)
+            )
+            vbox_opts.Add(self.chk_remember_save_directory, 0, wx.ALL | wx.EXPAND, 5)
 
             # Autosave Generated
             self.chk_auto_gen = wx.CheckBox(tab_opts, label=self._("auto_save_gen"))
@@ -1216,6 +1232,30 @@ class SettingsDialog(wx.Dialog):
         parent.chk_duration.SetValue(state["use_duration"])
         parent.spin_duration.SetValue(state["duration_val"])
 
+    def _populate_audio_outputs(self):
+        choice = self.choice_output_device
+        choice.Append(self._("audio_output_default"), None)
+        saved = self.cfg.get("audio_output_device")
+        selected = 0
+        try:
+            devices = list_output_devices(sd)
+        except Exception:
+            logging.exception("Could not enumerate audio outputs")
+            devices = []
+        for device in devices:
+            index = choice.Append(device.label, device.key)
+            if device.key == saved:
+                selected = index
+        if saved and selected == 0:
+            selected = choice.Append(
+                self._("audio_output_missing_item").format(name=saved[1], host=saved[0]), saved
+            )
+        choice.SetSelection(selected)
+
+    def _selected_audio_output(self):
+        index = self.choice_output_device.GetSelection()
+        return self.choice_output_device.GetClientData(index) if index != wx.NOT_FOUND else None
+
     def _collect_settings_state(self):
         state = {
             "config": deepcopy(self.cfg),
@@ -1229,6 +1269,7 @@ class SettingsDialog(wx.Dialog):
         state.update(
             {
                 "hide_console": self.chk_hide_console.GetValue(),
+                "audio_output_device": self._selected_audio_output(),
                 "preset_display": self.cb_preset_disp.GetSelection(),
                 "asr_model": self.cb_asr.GetValue(),
                 "preload_asr": self.chk_preload_asr.GetValue(),
@@ -1244,6 +1285,7 @@ class SettingsDialog(wx.Dialog):
                 "confirm_success": self.chk_confirm_success.GetValue(),
                 "remember_ai": self.chk_remember_ai.GetValue(),
                 "normalize_text": self.chk_normalize_text.GetValue(),
+                "remember_save_directory": self.chk_remember_save_directory.GetValue(),
                 "auto_save_generated": self.chk_auto_gen.GetValue(),
                 "direct_save_generated": self.chk_auto_gen_folder.GetValue(),
                 "generated_directory": self.txt_gen_folder.GetValue(),
@@ -1495,6 +1537,7 @@ class SettingsDialog(wx.Dialog):
             self.OnThemeChange(None)
             self.spin_font.SetValue(defaults["font_size"])
             self.chk_hide_console.SetValue(defaults["hide_console"])
+            self.choice_output_device.SetSelection(0)
             self.cb_preset_disp.SetSelection(0)
             self.cb_asr.SetValue(defaults["asr_model_name"])
             self.chk_preload_asr.SetValue(defaults["preload_asr"])
@@ -1511,6 +1554,7 @@ class SettingsDialog(wx.Dialog):
             self.chk_normalize_text.SetValue(defaults["normalize_text"])
             self.chk_clean_temp.SetValue(defaults["clean_temp"])
             self.chk_auto_gen.SetValue(defaults["auto_save_gen"])
+            self.chk_remember_save_directory.SetValue(defaults["remember_save_directory"])
             self.chk_auto_gen_folder.SetValue(defaults["auto_save_gen_folder"])
             self.txt_gen_folder.SetValue(defaults["generated_audio_directory"])
             self.txt_pref_gen.SetValue(defaults["prefix_gen"])
@@ -1665,6 +1709,7 @@ class SettingsDialog(wx.Dialog):
                     self.cfg["asr_model_name"] = new_asr
 
             self.cfg["hide_console"] = self.chk_hide_console.GetValue()
+            self.cfg["audio_output_device"] = self._selected_audio_output()
             idx = self.cb_preset_disp.GetSelection()
             self.cfg["preset_display_mode"] = (
                 "name" if idx == 0 else ("path" if idx == 1 else "name_path")
@@ -1682,6 +1727,11 @@ class SettingsDialog(wx.Dialog):
             self.cfg["auto_transcribe_reference"] = self.chk_auto_transcribe.GetValue()
             self.cfg["unload_asr_after_transcription"] = self.chk_unload_asr.GetValue()
             self.cfg["unload_omnivoice_after_operation"] = self.chk_unload_omnivoice.GetValue()
+            self.cfg["remember_save_directory"] = self.chk_remember_save_directory.GetValue()
+            if generated_directory != self.cfg.get("generated_audio_directory"):
+                self.cfg["last_generated_audio_directory"] = ""
+            if recorded_directory != self.cfg.get("recorded_audio_directory"):
+                self.cfg["last_recorded_audio_directory"] = ""
             self.cfg["auto_save_gen"] = self.chk_auto_gen.GetValue()
             self.cfg["auto_save_gen_folder"] = self.chk_auto_gen_folder.GetValue()
             self.cfg["generated_audio_directory"] = generated_directory
@@ -2237,6 +2287,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             old_lang = self.cfg["language"]
             old_asr = self.cfg.get("asr_model_name")
             old_preload = self.cfg.get("preload_asr", False)
+            old_audio_output = self.cfg.get("audio_output_device")
             old_auto_transcribe = self.cfg.get("auto_transcribe_reference", False)
             old_generated_directory = self.cfg["generated_audio_directory"]
             old_preset_display = self.cfg.get("preset_display_mode", "name")
@@ -2252,6 +2303,8 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 dlg.Destroy()
                 return
             self.cfg = dlg.cfg
+            if old_audio_output != self.cfg.get("audio_output_device"):
+                self.OnStopAudio(None)
             if old_preset_display != self.cfg.get("preset_display_mode", "name"):
                 self.RefreshPresets()
             if not old_auto_transcribe and self.cfg.get("auto_transcribe_reference", False):
@@ -3810,15 +3863,18 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
     def _play_sound_data(self, data, sample_rate):
         try:
-            sd.play(data, samplerate=sample_rate)
-            return True
-        except Exception as exc:
-            wx.MessageBox(
-                self._("err_playback").format(e=str(exc)),
-                self._("error_title"),
-                wx.OK | wx.ICON_ERROR,
+            selection = self.cfg.get("audio_output_device")
+            sd.play(data, samplerate=sample_rate, **playback_options(sd, selection))
+        except OutputDeviceUnavailableError:
+            message = self._("audio_output_unavailable").format(
+                name=selection[1], host=selection[0]
             )
-            return False
+        except Exception as exc:
+            message = self._("err_playback").format(e=str(exc))
+        else:
+            return True
+        wx.MessageBox(message, self._("error_title"), wx.OK | wx.ICON_ERROR, parent=self)
+        return False
 
     def _reset_generated_player(self):
         timer = getattr(self, "play_timer", None)
@@ -3924,12 +3980,14 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
 
     def PerformSaveAudio(self, data, fs, is_generated=True, force_dialog=False):
         if is_generated:
+            last_directory_key = "last_generated_audio_directory"
             skip_dialog = self.cfg.get("auto_save_gen_folder", False) and not force_dialog
             prefix = self.cfg.get("prefix_gen", "generated")
             configured_folder = self.cfg.get(
                 "generated_audio_directory", str(default_audio_directory("generated"))
             )
         else:
+            last_directory_key = "last_recorded_audio_directory"
             skip_dialog = self.cfg.get("auto_save_rec_folder", False) and not force_dialog
             prefix = self.cfg.get("prefix_rec", "record")
             configured_folder = self.cfg.get(
@@ -3937,6 +3995,10 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             )
 
         prefix = validate_filename_component(prefix, label="audio prefix")
+
+        def write_wave(temporary):
+            sf.write(str(temporary), data, fs)
+
         try:
             folder = output_directory_path(str(configured_folder))
         except (OSError, ValueError) as exc:
@@ -3945,44 +4007,71 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
             # A malformed saved preference must not block choosing another path.
             folder = Path.cwd()
         if skip_dialog:
-            path = write_numbered_audio(
-                folder, prefix, lambda temporary: sf.write(str(temporary), data, fs)
-            )
-            if self.cfg.get("confirm_success", False):
-                wx.MessageBox(
-                    self._("msg_save_ok") + f"\n{path}",
-                    self._("title_save"),
-                    wx.OK | wx.ICON_INFORMATION,
-                )
-            return str(path)
+            path = write_numbered_audio(folder, prefix, write_wave)
         else:
-            # A disconnected/read-only configured folder must not prevent Save As
-            # from opening. Do not create any directory until the user confirms.
+            remember = self.cfg.get("remember_save_directory", False)
+            last_directory = self.cfg.get(last_directory_key)
+            if remember and last_directory:
+                try:
+                    recent = output_directory_path(last_directory)
+                    if recent.is_dir():
+                        folder = recent
+                except (OSError, ValueError):
+                    pass  # A disconnected recent folder must not block Save As.
             if not folder.is_dir():
                 folder = Path.cwd()
-            idx = 1
-            while (folder / f"{prefix}_{idx}.wav").exists():
-                idx += 1
-            fname = f"{prefix}_{idx}.wav"
+            fname = suggest_audio_name(folder, prefix)
             with wx.FileDialog(
                 self,
                 self._("save"),
                 defaultDir=str(folder),
                 defaultFile=fname,
                 wildcard="WAV (*.wav)|*.wav",
-                style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+                style=wx.FD_SAVE,
             ) as fd:
-                if fd.ShowModal() != wx.ID_CANCEL:
-                    path = fd.GetPath()
-                    atomic_write(path, lambda temporary: sf.write(str(temporary), data, fs))
-                    if self.cfg.get("confirm_success", False):
-                        wx.MessageBox(
-                            self._("msg_save_ok") + f"\n{path}",
-                            self._("title_save"),
-                            wx.OK | wx.ICON_INFORMATION,
-                        )
-                    return path
-        return None
+                if fd.ShowModal() != wx.ID_OK:
+                    return None
+                chosen = Path(fd.GetPath())
+
+            def confirm_overwrite(target):
+                return (
+                    wx.MessageBox(
+                        self._("audio_replace_confirm").format(name=target.name),
+                        self._("warning_title"),
+                        wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
+                        parent=self,
+                    )
+                    == wx.YES
+                )
+
+            if os.path.normcase(chosen.name) == os.path.normcase(fname):
+                # Re-evaluate in the actual folder, not the dialog's initial
+                # folder. Another instance may have reserved the suggestion.
+                path = write_numbered_audio(chosen.parent, prefix, write_wave)
+            else:
+                path = write_named_audio(chosen, write_wave, confirm_overwrite)
+                if path is None:
+                    return None
+
+            if remember and str(path.parent) != last_directory:
+                self.cfg[last_directory_key] = str(path.parent)
+                try:
+                    SaveBasicConfig(self.cfg)
+                except OSError as exc:
+                    logging.warning("Could not remember audio save directory: %s", exc)
+                    wx.MessageBox(
+                        self._("audio_directory_remember_failed").format(error=str(exc)),
+                        self._("warning_title"),
+                        wx.OK | wx.ICON_WARNING,
+                        parent=self,
+                    )
+        if self.cfg.get("confirm_success", False):
+            wx.MessageBox(
+                self._("msg_save_ok") + f"\n{path}",
+                self._("title_save"),
+                wx.OK | wx.ICON_INFORMATION,
+            )
+        return str(path)
 
     def OnSaveAudio(self, event):
         if self.audio_data is not None:

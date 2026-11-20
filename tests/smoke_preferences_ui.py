@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 def main():
@@ -72,6 +72,35 @@ def main():
 
             cfg = deepcopy(DEFAULT_CONFIG)
             cfg["language"] = language
+            cfg["audio_output_device"] = ["Windows WASAPI", "Missing output"]
+            audio = Mock()
+            audio.query_hostapis.return_value = [{"name": "Windows WASAPI"}]
+            audio.query_devices.return_value = [
+                dict(index=7, name="Synthetic cable", hostapi=0, max_output_channels=2)
+            ]
+            with patch.object(desktop, "sd", audio):
+                output_settings = desktop.SettingsDialog(None, current_cfg=cfg)
+            try:
+                choice = output_settings.choice_output_device
+                assert choice.GetName() == translator("audio_output_device")
+                assert output_settings._selected_audio_output() == cfg["audio_output_device"]
+                assert not output_settings._has_unsaved_changes()
+                choice.SetSelection(1)
+                output_settings.chk_remember_save_directory.SetValue(True)
+                assert output_settings._has_unsaved_changes()
+                with patch.object(output_settings, "EndModal") as done:
+                    output_settings.OnSave(None)
+                    done.assert_called_once_with(wx.ID_OK)
+                assert output_settings.cfg["audio_output_device"] == [
+                    "Windows WASAPI",
+                    "Synthetic cable",
+                ]
+                assert output_settings.cfg["remember_save_directory"]
+                assert cfg["audio_output_device"] == ["Windows WASAPI", "Missing output"]
+            finally:
+                output_settings.Destroy()
+                application.Yield()
+
             for key, expected in ((wx.WXK_RETURN, wx.ID_OK), (wx.WXK_ESCAPE, wx.ID_CANCEL)):
                 settings = desktop.SettingsDialog(None, current_cfg=cfg)
                 with patch.object(wx, "MessageBox", return_value=wx.YES) as message:

@@ -13,7 +13,12 @@ from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 
-from omnisonic.files import atomic_write, write_numbered_audio
+from omnisonic.files import (
+    atomic_write,
+    suggest_audio_name,
+    write_named_audio,
+    write_numbered_audio,
+)
 from omnisonic.operations import OperationState
 from omnisonic.validation import (
     output_directory_path,
@@ -104,7 +109,7 @@ class FileSafetyTests(unittest.TestCase):
         self.assertEqual(list(self.scratch.iterdir()), [destination])
 
     def test_numbered_output_does_not_overwrite_other_instances(self):
-        first = self.scratch / "voice_1.wav"
+        first = self.scratch / "voice.wav"
         first.write_bytes(b"existing")
         barrier = threading.Barrier(2, timeout=10)
 
@@ -117,16 +122,47 @@ class FileSafetyTests(unittest.TestCase):
 
         with ThreadPoolExecutor(2) as pool:
             paths = list(pool.map(save, [b"one", b"two"]))
-        self.assertEqual({p.name for p in paths}, {"voice_2.wav", "voice_3.wav"})
+        self.assertEqual({p.name for p in paths}, {"voice1.wav", "voice2.wav"})
         self.assertEqual([p.read_bytes() for p in paths], [b"one", b"two"])
         self.assertEqual(first.read_bytes(), b"existing")
 
     def test_failed_numbered_save_removes_its_reservation_only(self):
-        first = self.scratch / "voice_1.wav"
+        first = self.scratch / "voice.wav"
         first.write_bytes(b"existing")
         with self.assertRaisesRegex(OSError, "no space"):
             write_numbered_audio(self.scratch, "voice", Mock(side_effect=OSError("no space")))
         self.assertEqual(list(self.scratch.iterdir()), [first])
+
+    def test_first_free_suffix_reuses_gaps_and_skips_directory_collisions(self):
+        (self.scratch / "generated.wav").mkdir()
+        (self.scratch / "generated2.wav").write_bytes(b"keep")
+        self.assertEqual(suggest_audio_name(self.scratch, "generated"), "generated1.wav")
+        result = write_numbered_audio(self.scratch, "generated", lambda p: p.write_bytes(b"new"))
+        self.assertEqual(result.name, "generated1.wav")
+        self.assertEqual((self.scratch / "generated2.wav").read_bytes(), b"keep")
+        self.assertTrue((self.scratch / "generated.wav").is_dir())
+
+    def test_custom_filename_requires_explicit_consent_to_replace(self):
+        path = self.scratch / "chosen.wav"
+        path.write_bytes(b"original")
+        writer = Mock(side_effect=lambda p: p.write_bytes(b"replacement"))
+        confirm = Mock(return_value=False)
+        self.assertIsNone(write_named_audio(path, writer, confirm))
+        confirm.assert_called_once_with(path)
+        writer.assert_not_called()
+        self.assertEqual(path.read_bytes(), b"original")
+        confirm.return_value = True
+        self.assertEqual(write_named_audio(path, writer, confirm), path)
+        self.assertEqual(path.read_bytes(), b"replacement")
+
+    def test_new_audio_write_does_not_treat_a_real_permission_error_as_a_collision(self):
+        writer = Mock()
+        with (
+            patch("omnisonic.files.os.open", side_effect=PermissionError("not writable")),
+            self.assertRaisesRegex(PermissionError, "not writable"),
+        ):
+            write_numbered_audio(self.scratch, "voice", writer)
+        writer.assert_not_called()
 
     def test_config_write_failure_does_not_leave_temporary_config_files(self):
         from omnisonic.config import save_config
@@ -150,7 +186,8 @@ class FileSafetyTests(unittest.TestCase):
         configured = self.scratch / "not-a-directory"
         configured.write_bytes(b"not a folder")
         destination = self.scratch / "selected.wav"
-        wx = MagicMock(ID_CANCEL=1)
+        wx = MagicMock(ID_CANCEL=1, ID_OK=2, YES=3)
+        wx.MessageBox.return_value = wx.YES
         dialog = wx.FileDialog.return_value.__enter__.return_value
         dialog.ShowModal.return_value = 2
         dialog.GetPath.return_value = str(destination)
@@ -164,6 +201,8 @@ class FileSafetyTests(unittest.TestCase):
                 wx=wx,
                 sf=sf,
                 atomic_write=atomic_write,
+                suggest_audio_name=suggest_audio_name,
+                write_named_audio=write_named_audio,
                 write_numbered_audio=write_numbered_audio,
                 validate_filename_component=validate_filename_component,
                 default_audio_directory=lambda kind: self.scratch / kind,
@@ -210,7 +249,73 @@ class FileSafetyTests(unittest.TestCase):
             )
             result = Path(save(frame, [], 24000, is_generated=generated))
             self.assertEqual(result.parent, folder)
+            self.assertEqual(result.name, "generated.wav" if generated else "record.wav")
             self.assertEqual(result.read_bytes(), b"synthetic audio")
+            second = Path(save(frame, [], 24000, is_generated=generated))
+            self.assertEqual(second.name, "generated1.wav" if generated else "record1.wav")
+            self.assertEqual(result.read_bytes(), b"synthetic audio")
+
+    def test_save_dialog_remembers_actual_destination_separately_across_reload(self):
+        from omnisonic.config import load_config, save_config
+
+        config_path = self.scratch / "profile" / "settings.json"
+        configured, chosen, recording = (self.scratch / name for name in ("default", "new", "rec"))
+        for folder in (configured, chosen, recording):
+            folder.mkdir()
+        (chosen / "generated.wav").write_bytes(b"existing")
+        (chosen / "generated2.wav").write_bytes(b"keep")
+        wx = MagicMock(ID_OK=1, ID_CANCEL=2, YES=3)
+        dialog = wx.FileDialog.return_value.__enter__.return_value
+        dialog.ShowModal.return_value = wx.ID_OK
+        dialog.GetPath.return_value = str(chosen / "generated.wav")
+        save_settings = Mock(side_effect=lambda cfg: save_config(cfg, config_path))
+        save = app_methods(
+            {"PerformSaveAudio"},
+            dict(
+                Path=Path,
+                os=os,
+                sf=SimpleNamespace(write=lambda p, data, rate: Path(p).write_bytes(b"synthetic")),
+                wx=wx,
+                SaveBasicConfig=save_settings,
+                logging=logging,
+                write_numbered_audio=write_numbered_audio,
+                write_named_audio=write_named_audio,
+                suggest_audio_name=suggest_audio_name,
+                validate_filename_component=validate_filename_component,
+                validation_error_message=validation_error_message,
+                default_audio_directory=lambda kind: configured,
+            ),
+        )["PerformSaveAudio"]
+        frame = SimpleNamespace(
+            cfg={
+                "remember_save_directory": True,
+                "generated_audio_directory": str(configured),
+                "recorded_audio_directory": str(configured),
+            },
+            _=lambda key: key,
+        )
+        self.assertEqual(save(frame, [], 24000), str(chosen / "generated1.wav"))
+        self.assertEqual((chosen / "generated.wav").read_bytes(), b"existing")
+        self.assertEqual(wx.FileDialog.call_args.kwargs["defaultFile"], "generated.wav")
+        wx.MessageBox.assert_not_called()
+        frame.cfg = load_config(config_path)
+        dialog.GetPath.return_value = str(recording / "record.wav")
+        self.assertEqual(save(frame, [], 24000, is_generated=False), str(recording / "record.wav"))
+        self.assertEqual(wx.FileDialog.call_args.kwargs["defaultDir"], str(configured))
+        frame.cfg = load_config(config_path)
+        self.assertEqual(frame.cfg["last_recorded_audio_directory"], str(recording))
+        dialog.ShowModal.return_value = wx.ID_CANCEL
+        self.assertIsNone(save(frame, [], 24000))
+        self.assertEqual(wx.FileDialog.call_args.kwargs["defaultDir"], str(chosen))
+        self.assertEqual(wx.FileDialog.call_args.kwargs["defaultFile"], "generated3.wav")
+        self.assertEqual(save_settings.call_count, 2)
+        frame.cfg["remember_save_directory"] = False
+        self.assertIsNone(save(frame, [], 24000))
+        self.assertEqual(wx.FileDialog.call_args.kwargs["defaultDir"], str(configured))
+        frame.cfg.update(remember_save_directory=True, auto_save_gen_folder=True)
+        self.assertEqual(save(frame, [], 24000), str(configured / "generated.wav"))
+        self.assertEqual(save_settings.call_count, 2)
+        self.assertEqual(frame.cfg["last_generated_audio_directory"], str(chosen))
 
 
 class RecordingTests(unittest.TestCase):
@@ -433,6 +538,7 @@ class RecordingGatingTests(unittest.TestCase):
             rec_stream=None,
             rec_data=[],
             model=None,
+            _models=Mock(),
             cfg={"warn_exit": False, "remember_ai_settings": False, "clean_temp": False},
             _closing=False,
             _confirming_close=False,

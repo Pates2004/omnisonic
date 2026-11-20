@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "algorithm": "sha256-lf",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "files": [
     {
       "path": ".gitattributes",
@@ -33,7 +33,7 @@
     },
     {
       "path": ".github/workflows/quality.yml",
-      "sha256": "b4b78e24fe3daceffc568a0c61232d0b30666d7b120bb17ada79abaa090a4dd7"
+      "sha256": "0832bedef327c4a6fb44eb320729b2d773cfb5a370ebbecdcc312583d8b0880a"
     },
     {
       "path": ".github/workflows/stale.yml",
@@ -73,15 +73,15 @@
     },
     {
       "path": "docs/data_preparation.md",
-      "sha256": "678b53377a4c79c601eb7bc5426353f5588815f30ce8e04664fde362d5fc6651"
+      "sha256": "a0bee0a0425542efa43ab6d63c114774daa26f24bccbf8f4ae7096c5a070c058"
     },
     {
       "path": "docs/data_preparation_advanced.md",
-      "sha256": "32fec05b6d713b3771430c850626b3b37752b2306fdd7fb10872348c33206dd9"
+      "sha256": "415c17c37da4ba9cc9b1611b240017cb78269d9fcb31dc707d412706b32de47c"
     },
     {
       "path": "docs/evaluation.md",
-      "sha256": "002faaddb456e75c3dc1a1cd6e0038ddcb150eab7ba7f509d44334a4403a83b1"
+      "sha256": "0cd8715b99d5e95fe1cb96496aa0d4aef63abd81bd43c9d76091971751a1530b"
     },
     {
       "path": "docs/generation-parameters.md",
@@ -157,7 +157,7 @@
     },
     {
       "path": "examples/run_emilia.sh",
-      "sha256": "0373fec716126f3ea9fcecd02d8354a338a8f5efc7c0effdebcb1ffbad4a6d87"
+      "sha256": "6dd4e092fdd661a9fdfd30e0ef012612743c1a015268335f24115f09644cfa3f"
     },
     {
       "path": "examples/run_eval.sh",
@@ -165,11 +165,11 @@
     },
     {
       "path": "examples/run_finetune.sh",
-      "sha256": "340351710155ffa944edbb1ef73abb595f0ea6aa6ebb6a7b7a2480a13605c876"
+      "sha256": "20c110aaf5e964933d2374367f3b408cddd0917deadc5ba1a65e4ed334b6a5b3"
     },
     {
       "path": "examples/run_finetune_lora.sh",
-      "sha256": "bc7d2e7519480fa7bc56b7578c9c9c5680e4684befc947a991e3d25ae68c67ba"
+      "sha256": "1fcf6b88006820f2eb09d718c2a1e48063c97e6dd79404c3e66e892ebfbb3cb3"
     },
     {
       "path": "installer_backends.json",
@@ -181,11 +181,11 @@
     },
     {
       "path": "langs/en.lng",
-      "sha256": "2607991a275447c23de4bf0e1eaa9eaa98446766423528055672fcb172ce788d"
+      "sha256": "c913b23d529e33fae10be4ffc07820e62b71744595f43f490ab31a0724f0f3ac"
     },
     {
       "path": "langs/pl.lng",
-      "sha256": "b71d1847e81182e319cf9a0ab71c95ad42439b41a1d695a296e6a5e1d89c5335"
+      "sha256": "1e06bf0f834121140d715770b5ba2ffac2c30b865ee111a3d0a80fad409ad2a9"
     },
     {
       "path": "LICENSE",
@@ -193,7 +193,7 @@
     },
     {
       "path": "omnisonic/__init__.py",
-      "sha256": "04e1636c6c2fa7c998b990d8b7ae93cd5e17ed2e288e0a7ca19574cf6d043b4a"
+      "sha256": "f16df8f6e941f7cc3a084690fef79eed92f149537cc49384a1cfc4312893716a"
     },
     {
       "path": "omnisonic/accelerator.py",
@@ -201,7 +201,11 @@
     },
     {
       "path": "omnisonic/app.py",
-      "sha256": "bdd119abe5da118e999c3c4c8b1549e96e7c0122dc390c9f80cb994a6ac966ac"
+      "sha256": "ca667eb397cb8dd96d2173053948a61129619473a6fe81e32d7e02ec7eadf2f1"
+    },
+    {
+      "path": "omnisonic/audio_output.py",
+      "sha256": "5b2b7698e09b3adfd3e7411f77c4f725d0501a1cf3f25b8cf076113fe941ef9b"
     },
     {
       "path": "omnisonic/batch.py",
@@ -213,11 +217,11 @@
     },
     {
       "path": "omnisonic/config.py",
-      "sha256": "a175c4e717ec21fcd28756d45e0f2e93a4bd51a1c5d9e07ead72a7da08f6bf53"
+      "sha256": "f616e1b4dcb31c3ee4c28689a0f1fe7203130003092f80b9d095d0f0b9b9650e"
     },
     {
       "path": "omnisonic/files.py",
-      "sha256": "9759c0c5ec1ee59541f72cce148dd73a7c80633b17f223255cc2bc702a1ae277"
+      "sha256": "e08a97db98ecd4a4501c911a82fe6905aa3421d755d0446c23aeda68c3116a2e"
     },
     {
       "path": "omnisonic/help_dialogs.py",
@@ -377,7 +381,7 @@
     },
     {
       "path": "omnivoice/models/omnivoice.py",
-      "sha256": "6c64fd9f11bc03d89b9e5a2f0068634eef335b33f61ec15c961d46b6c6df260e"
+      "sha256": "599e212a9b11eda6195cf26f54a4079adbdfdb8d7b097b061ad14d39392d4fee"
     },
     {
       "path": "omnivoice/models/omnivoice_flashinfer.py",
@@ -393,11 +397,11 @@
     },
     {
       "path": "omnivoice/scripts/extract_audio_tokens.py",
-      "sha256": "de5f9b876beebedbcecdf071fe5e03379c40b8c45377e0670e47c4cc10eb6517"
+      "sha256": "8fdc2a66d3974e9ea8d691eb5bb9179573178a40402c0ec1073d4a81639117d2"
     },
     {
       "path": "omnivoice/scripts/extract_audio_tokens_add_noise.py",
-      "sha256": "48d868ee79d05ba538f8f3e220de3ea17660b6917a6aa2fc80a32adfa9782048"
+      "sha256": "d41ff2e494bb4be4fb9e6b95330d5b6489004ee6d3b026bdc3223422f624cd46"
     },
     {
       "path": "omnivoice/scripts/jsonl_to_webdataset.py",
@@ -481,11 +485,11 @@
     },
     {
       "path": "pyproject.toml",
-      "sha256": "bcd878080ed100c98aafb4bc93f6cadee446f1b0b4dc2548c0d37fb69db38ef8"
+      "sha256": "fff2ae4e2ff7d434304c5647b6dbe379c0e6c4fe57d49281d88aa47929db2ec4"
     },
     {
       "path": "README.md",
-      "sha256": "af4ef54de4023ef1484b7998d90dfb984b27b5f8aa5668f36dbd357ad406f27c"
+      "sha256": "ae6e82f30abf46118e447ba2ccf19cf5e15f7d95d5dd5709f97579fc4e7a9ab7"
     },
     {
       "path": "requirements-desktop.txt",
@@ -565,7 +569,7 @@
     },
     {
       "path": "tests/smoke_preferences_ui.py",
-      "sha256": "446f7e0b0c4187ea61e927fd2874b629017c6a06f8b562e640aa9a3e6434c8a4"
+      "sha256": "40af96300726e4e6292342769f1d7dc352c80a9f71164df0f2a2805442568773"
     },
     {
       "path": "tests/smoke_recording_ui.py",
@@ -610,6 +614,10 @@
     {
       "path": "tests/startup_stub.py",
       "sha256": "bdc69b45d6c7281e7ec526d2eacde5c85f42d711e44cdbbf060834ac63ae064f"
+    },
+    {
+      "path": "tests/test_audio_tokenizer.py",
+      "sha256": "c18e3eef230a8bd155d267af510c93f49a4823b32f66850ab864fac6d3f91567"
     },
     {
       "path": "tests/test_batch.py",
@@ -657,7 +665,7 @@
     },
     {
       "path": "tests/test_file_safety.py",
-      "sha256": "8ebfc0920c7057b19a44708deef98d1a0ab457399e41627a6a749f35df6c72cf"
+      "sha256": "4f90616d6740c9ba8ed7b5d7f9e2bd55e5b1b28b06506a0fe579a30fe3d25d57"
     },
     {
       "path": "tests/test_generation_inputs.py",
@@ -725,7 +733,7 @@
     },
     {
       "path": "tests/test_playback.py",
-      "sha256": "66bc8bf2bce0c546bc59f834cdcab31a8a89b794b8614ee13937fcb0a87aa79b"
+      "sha256": "09767146a5658743721915ff706e41a71c0dda2af8c6d04c39a3e627af39ed97"
     },
     {
       "path": "tests/test_power_switch.ps1",
@@ -845,7 +853,7 @@
     },
     {
       "path": "uv.lock",
-      "sha256": "a0b27b987377d8e7ca83f3c6b4aa7d8be07396ed3510746af34dd0f680d6af89"
+      "sha256": "98d8743f109c0ef6df421297310a67bf491559b27a3acaeeccd70b0e8c7fca75"
     },
     {
       "path": "wx_app.py",

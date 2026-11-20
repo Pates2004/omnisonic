@@ -6,6 +6,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
+from omnisonic.audio_output import (
+    WASAPI,
+    OutputDeviceUnavailableError,
+    list_output_devices,
+    playback_options,
+)
+from omnisonic.config import normalize_config
 from omnisonic.validation import normalize_pasted_path
 
 
@@ -24,13 +31,16 @@ class Button:
 
 class PlaybackTests(unittest.TestCase):
     def setUp(self):
-        self.wx = Mock()
+        self.wx = Mock(OK=1, ICON_ERROR=2)
+        self.sounddevice = Mock()
         waveform = MagicMock(shape=(1, 100))
         waveform.__getitem__.return_value = list(range(100))
         namespace = {
             "wx": self.wx,
             "normalize_pasted_path": normalize_pasted_path,
-            "sd": Mock(),
+            "sd": self.sounddevice,
+            "playback_options": playback_options,
+            "OutputDeviceUnavailableError": OutputDeviceUnavailableError,
             "os": SimpleNamespace(path=SimpleNamespace(exists=lambda path: True)),
             "load_waveform": lambda path: (waveform, 100),
         }
@@ -45,11 +55,13 @@ class PlaybackTests(unittest.TestCase):
             "_reset_generated_player",
             "_reset_reference_player",
             "OnReferenceAudioChanged",
+            "_play_sound_data",
         }
         methods = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name in names]
         exec(compile(ast.Module(body=methods, type_ignores=[]), "playback", "exec"), namespace)
         self.frame = SimpleNamespace(
             audio_data=list(range(100)),
+            cfg={},
             sample_rate=100,
             _generated_playback_state="stopped",
             _reference_playback_state="stopped",
@@ -68,7 +80,10 @@ class PlaybackTests(unittest.TestCase):
             _=lambda key: key,
         )
         for name in names:
-            setattr(self.frame, name, namespace[name].__get__(self.frame))
+            if name == "_play_sound_data":
+                self.native_play = namespace[name].__get__(self.frame)
+            else:
+                setattr(self.frame, name, namespace[name].__get__(self.frame))
 
     def play(self, reference):
         if reference:
@@ -80,6 +95,66 @@ class PlaybackTests(unittest.TestCase):
             )
         else:
             self.frame.OnPlayAudio(None)
+
+    def test_generated_and_reference_playback_route_to_the_same_saved_wasapi_output(self):
+        self.frame.cfg["audio_output_device"] = [WASAPI, "Cable"]
+        self.frame._play_sound_data = self.native_play
+        self.sounddevice.query_hostapis.return_value = [{"name": "MME"}, {"name": WASAPI}]
+        for reference, index in ((False, 7), (True, 23)):
+            with self.subTest(reference=reference):
+                self.sounddevice.reset_mock()
+                self.sounddevice.query_devices.return_value = [
+                    dict(index=2, name="Cable", hostapi=0, max_output_channels=2),
+                    dict(index=index, name="Cable", hostapi=1, max_output_channels=2),
+                ]
+                self.play(reference)
+                self.sounddevice.play.assert_called_once()
+                self.assertEqual(self.sounddevice.play.call_args.kwargs["device"], index)
+                self.assertIs(
+                    self.sounddevice.play.call_args.kwargs["extra_settings"],
+                    self.sounddevice.WasapiSettings.return_value,
+                )
+                self.sounddevice.WasapiSettings.assert_called_once_with(auto_convert=True)
+        self.sounddevice.InputStream.assert_not_called()
+        self.wx.MessageBox.assert_not_called()
+
+    def test_unavailable_saved_output_reports_error_without_using_default(self):
+        self.frame.cfg["audio_output_device"] = [WASAPI, "Missing"]
+        self.sounddevice.query_hostapis.return_value = []
+        self.sounddevice.query_devices.return_value = []
+        self.assertFalse(self.native_play([0], 24000))
+        self.sounddevice.play.assert_not_called()
+        self.assertEqual(self.wx.MessageBox.call_args.args[0], "audio_output_unavailable")
+
+    def test_default_output_preserves_normal_portaudio_routing(self):
+        self.assertTrue(self.native_play([0], 24000))
+        self.sounddevice.play.assert_called_once_with([0], samplerate=24000)
+        self.sounddevice.query_devices.assert_not_called()
+
+    def test_device_choices_hide_input_only_and_indistinguishable_outputs(self):
+        self.sounddevice.query_hostapis.return_value = [{"name": WASAPI}, {"name": "MME"}]
+        self.sounddevice.query_devices.return_value = [
+            dict(index=0, hostapi=0, name="Mic", max_output_channels=0),
+            dict(index=1, hostapi=0, name="Duplicate", max_output_channels=2),
+            dict(index=2, hostapi=0, name="Duplicate", max_output_channels=2),
+            dict(index=3, hostapi=0, name="Headphones", max_output_channels=2),
+            dict(index=4, hostapi=1, name="Headphones", max_output_channels=2),
+        ]
+        self.assertEqual([item.index for item in list_output_devices(self.sounddevice)], [3, 4])
+        with self.assertRaises(OutputDeviceUnavailableError):
+            playback_options(self.sounddevice, [WASAPI, "Duplicate"])
+        self.assertEqual(playback_options(self.sounddevice, ["MME", "Headphones"]), {"device": 4})
+
+    def test_output_identity_round_trips_and_numeric_indexes_are_not_trusted(self):
+        self.assertEqual(
+            normalize_config({"audio_output_device": (WASAPI, "Cable")})["audio_output_device"],
+            [WASAPI, "Cable"],
+        )
+        for invalid in (0, True, "Cable", [WASAPI, ""], [WASAPI, 2]):
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(
+                    normalize_config({"audio_output_device": invalid})["audio_output_device"]
+                )
 
     def test_pause_uses_monotonic_clock_including_zero_start(self):
         for reference in (False, True):
