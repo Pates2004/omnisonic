@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "algorithm": "sha256-lf",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "files": [
     {
       "path": ".gitattributes",
@@ -181,11 +181,11 @@
     },
     {
       "path": "langs/en.lng",
-      "sha256": "c913b23d529e33fae10be4ffc07820e62b71744595f43f490ab31a0724f0f3ac"
+      "sha256": "16af24b46734cbb0719398b01b7339946184f8e45f9d11b130a60f1d5f5a3185"
     },
     {
       "path": "langs/pl.lng",
-      "sha256": "1e06bf0f834121140d715770b5ba2ffac2c30b865ee111a3d0a80fad409ad2a9"
+      "sha256": "4db6590d60b4b1fb1ceb30ce816f44fb3b5d36c59b01dc288ce245122d683647"
     },
     {
       "path": "LICENSE",
@@ -193,7 +193,7 @@
     },
     {
       "path": "omnisonic/__init__.py",
-      "sha256": "f16df8f6e941f7cc3a084690fef79eed92f149537cc49384a1cfc4312893716a"
+      "sha256": "799d3bac03c33473af0362af202ee46791041f944a0daaa31ebe5197757fdb33"
     },
     {
       "path": "omnisonic/accelerator.py",
@@ -201,11 +201,11 @@
     },
     {
       "path": "omnisonic/app.py",
-      "sha256": "ca667eb397cb8dd96d2173053948a61129619473a6fe81e32d7e02ec7eadf2f1"
+      "sha256": "ef42c27b83299878f37fc228eb5ac75949b1834b5b182d81db29a2a23ae4dd6e"
     },
     {
-      "path": "omnisonic/audio_output.py",
-      "sha256": "5b2b7698e09b3adfd3e7411f77c4f725d0501a1cf3f25b8cf076113fe941ef9b"
+      "path": "omnisonic/audio_devices.py",
+      "sha256": "9da7f82bc948df563849e44179a0992a7a5968c047e7e0fb16a7525ae83ec70a"
     },
     {
       "path": "omnisonic/batch.py",
@@ -217,7 +217,7 @@
     },
     {
       "path": "omnisonic/config.py",
-      "sha256": "f616e1b4dcb31c3ee4c28689a0f1fe7203130003092f80b9d095d0f0b9b9650e"
+      "sha256": "d3825f1f40b436c15f8d7bf35b29e155e093bd5125b8fb74b29b570c6d1ae20d"
     },
     {
       "path": "omnisonic/files.py",
@@ -485,11 +485,11 @@
     },
     {
       "path": "pyproject.toml",
-      "sha256": "fff2ae4e2ff7d434304c5647b6dbe379c0e6c4fe57d49281d88aa47929db2ec4"
+      "sha256": "1dca9d422a4f4e6ab69f13629d49cdde89f43ce132a585e1641e6bd0e72134fc"
     },
     {
       "path": "README.md",
-      "sha256": "ae6e82f30abf46118e447ba2ccf19cf5e15f7d95d5dd5709f97579fc4e7a9ab7"
+      "sha256": "8b5eaf045ee80c96b45079cd05dddf65ca445cae58cb6b3a37d9bd35706e727a"
     },
     {
       "path": "requirements-desktop.txt",
@@ -569,7 +569,7 @@
     },
     {
       "path": "tests/smoke_preferences_ui.py",
-      "sha256": "40af96300726e4e6292342769f1d7dc352c80a9f71164df0f2a2805442568773"
+      "sha256": "3df12bb8ecb5e338a86d972724e7440f70941c5b696796d6aa7520b38b84411a"
     },
     {
       "path": "tests/smoke_recording_ui.py",
@@ -665,7 +665,7 @@
     },
     {
       "path": "tests/test_file_safety.py",
-      "sha256": "4f90616d6740c9ba8ed7b5d7f9e2bd55e5b1b28b06506a0fe579a30fe3d25d57"
+      "sha256": "0acb19a1efb504a20a35ba9562b1576698f89e74ca6eb8fac1c3de3ab090fbf4"
     },
     {
       "path": "tests/test_generation_inputs.py",
@@ -733,7 +733,7 @@
     },
     {
       "path": "tests/test_playback.py",
-      "sha256": "09767146a5658743721915ff706e41a71c0dda2af8c6d04c39a3e627af39ed97"
+      "sha256": "e03d83d692e678e31f910702c5d166a8fd4b0625362a48693e6b45dbe677b8da"
     },
     {
       "path": "tests/test_power_switch.ps1",
@@ -853,7 +853,7 @@
     },
     {
       "path": "uv.lock",
-      "sha256": "98d8743f109c0ef6df421297310a67bf491559b27a3acaeeccd70b0e8c7fca75"
+      "sha256": "3cbf4146f7cd27796d8e41f2a6b3c1ceaaef7053ec826f61fa807986e551a89b"
     },
     {
       "path": "wx_app.py",

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 
+from omnisonic.audio_devices import AudioDeviceUnavailableError, stream_options
 from omnisonic.files import (
     atomic_write,
     suggest_audio_name,
@@ -335,6 +336,8 @@ class RecordingTests(unittest.TestCase):
                 atomic_write=self.write,
                 RECORDED_AUDIO_FILE=Path("synthetic.wav"),
                 sf=self.sf,
+                stream_options=stream_options,
+                AudioDeviceUnavailableError=AudioDeviceUnavailableError,
                 validation_error_message=validation_error_message,
             ),
         )
@@ -384,12 +387,86 @@ class RecordingTests(unittest.TestCase):
                 self.sd.InputStream.return_value.samplerate = rate
                 self.frame.ToggleRecord(self.button, self.path)
                 self.assertNotIn("samplerate", self.sd.InputStream.call_args.kwargs)
+                self.assertNotIn("device", self.sd.InputStream.call_args.kwargs)
                 callback = self.sd.InputStream.call_args.kwargs["callback"]
                 callback(np.ones((10, 1)), 10, None, None)
                 self.frame.ToggleRecord(self.button, self.path)
                 self.assertEqual(self.sf.write.call_args.args[2], rate)
                 self.assertEqual(self.frame.rec_data, [])
                 self.assertIsNone(self.frame.rec_stream)
+
+    def test_selected_microphone_uses_current_input_index_not_output_or_global_defaults(self):
+        self.frame.cfg.update(
+            audio_input_device=["Windows WASAPI", "USB microphone"],
+            audio_output_device=["Windows WASAPI", "Speakers"],
+        )
+        self.sd.default.device = (1, 2)
+        self.sd.query_hostapis.return_value = [{"name": "MME"}, {"name": "Windows WASAPI"}]
+        for index in (34, 42):
+            with self.subTest(reindexed=index):
+                self.sd.query_devices.return_value = [
+                    dict(index=1, name="USB microphone", max_input_channels=2, hostapi=0),
+                    dict(index=2, name="Speakers", max_input_channels=0, hostapi=1),
+                    dict(index=index, name="USB microphone", max_input_channels=2, hostapi=1),
+                ]
+                self.frame.ToggleRecord(self.button, self.path)
+                options = self.sd.InputStream.call_args.kwargs
+                self.assertEqual(options["device"], index)
+                self.assertEqual(options["channels"], 1)
+                self.assertNotIn("samplerate", options)
+                self.frame._CloseRecording()
+        self.assertEqual(self.sd.default.device, (1, 2))
+        self.sd.play.assert_not_called()
+        self.sd.WasapiSettings.assert_not_called()
+
+    def test_missing_ambiguous_or_output_only_input_never_records_from_default(self):
+        self.frame.cfg["audio_input_device"] = ["Windows WASAPI", "USB microphone"]
+        self.frame._ = lambda key: (
+            "Unavailable: {name} ({host})" if key == "audio_input_unavailable" else "{error}"
+        )
+        self.sd.query_hostapis.return_value = [{"name": "Windows WASAPI"}]
+        for channels in ([], [0], [2, 2]):
+            with self.subTest(channels=channels):
+                self.sd.query_devices.return_value = [
+                    dict(index=i, hostapi=0, name="USB microphone", max_input_channels=c)
+                    for i, c in enumerate(channels)
+                ]
+                self.frame.ToggleRecord(self.button, self.path)
+                self.assertIsNone(self.frame.rec_stream)
+                self.assertEqual(self.frame.rec_data, [])
+                self.sd.InputStream.assert_not_called()
+                self.assertIn(
+                    "Unavailable: USB microphone (Windows WASAPI)",
+                    self.wx.MessageBox.call_args.args[0],
+                )
+
+    def test_recording_warning_is_logged_after_stop_not_in_audio_callback(self):
+        self.frame.ToggleRecord(self.button, self.path)
+        callback = self.sd.InputStream.call_args.kwargs["callback"]
+        with patch.object(logging, "warning") as warn:
+            callback(np.ones((10, 1)), 10, None, "input overflow")
+            callback(np.ones((10, 1)), 10, None, "another overflow")
+            warn.assert_not_called()
+            self.frame.ToggleRecord(self.button, self.path)
+        warn.assert_called_once_with("Audio input status: %s", "input overflow")
+        self.write.assert_called_once()
+
+    def test_input_and_output_preferences_persist_independently(self):
+        from omnisonic.config import load_config, normalize_config, save_config
+
+        path = scratch_directory("audio-input-config-") / "settings.json"
+        settings = dict(
+            audio_input_device=["MME", "Mikrofon Ł"], audio_output_device=["MME", "Output"]
+        )
+        save_config(settings, path)
+        cfg = load_config(path)
+        for key, selection in settings.items():
+            self.assertEqual(cfg[key], selection)
+        for invalid in (2, True, "Microphone", ["", "mic"], ["MME", None]):
+            with self.subTest(value=invalid):
+                cfg = normalize_config(dict(settings, audio_input_device=invalid))
+                self.assertIsNone(cfg["audio_input_device"])
+                self.assertEqual(cfg["audio_output_device"], settings["audio_output_device"])
 
     def test_failed_temp_save_keeps_audio_until_successful_save_as(self):
         chunks = [np.ones((10, 1))]

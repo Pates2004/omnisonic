@@ -73,18 +73,43 @@ def main():
             cfg = deepcopy(DEFAULT_CONFIG)
             cfg["language"] = language
             cfg["audio_output_device"] = ["Windows WASAPI", "Missing output"]
+            cfg["audio_input_device"] = ["Windows WASAPI", "Missing microphone"]
             audio = Mock()
             audio.query_hostapis.return_value = [{"name": "Windows WASAPI"}]
             audio.query_devices.return_value = [
-                dict(index=7, name="Synthetic cable", hostapi=0, max_output_channels=2)
+                dict(
+                    index=7,
+                    name="Synthetic cable",
+                    hostapi=0,
+                    max_output_channels=2,
+                    max_input_channels=0,
+                ),
+                dict(
+                    index=8,
+                    name="Synthetic mic",
+                    hostapi=0,
+                    max_output_channels=0,
+                    max_input_channels=2,
+                ),
             ]
             with patch.object(desktop, "sd", audio):
                 output_settings = desktop.SettingsDialog(None, current_cfg=cfg)
             try:
                 choice = output_settings.choice_output_device
+                microphone = output_settings.choice_input_device
                 assert choice.GetName() == translator("audio_output_device")
-                assert output_settings._selected_audio_output() == cfg["audio_output_device"]
+                assert microphone.GetName() == translator("audio_input_device")
+                assert microphone.GetCount() == choice.GetCount() == 3
+                assert output_settings._selected_audio_device(choice) == cfg["audio_output_device"]
+                assert (
+                    output_settings._selected_audio_device(microphone) == cfg["audio_input_device"]
+                )
                 assert not output_settings._has_unsaved_changes()
+                microphone.SetSelection(1)
+                assert output_settings._has_unsaved_changes()
+                microphone.SetSelection(2)
+                assert not output_settings._has_unsaved_changes()
+                microphone.SetSelection(1)
                 choice.SetSelection(1)
                 output_settings.chk_remember_save_directory.SetValue(True)
                 assert output_settings._has_unsaved_changes()
@@ -96,6 +121,11 @@ def main():
                     "Synthetic cable",
                 ]
                 assert output_settings.cfg["remember_save_directory"]
+                assert output_settings.cfg["audio_input_device"] == [
+                    "Windows WASAPI",
+                    "Synthetic mic",
+                ]
+                assert cfg["audio_input_device"] == ["Windows WASAPI", "Missing microphone"]
                 assert cfg["audio_output_device"] == ["Windows WASAPI", "Missing output"]
             finally:
                 output_settings.Destroy()

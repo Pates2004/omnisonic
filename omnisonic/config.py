@@ -13,7 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
-from .audio_output import normalize_output_device
+from .audio_devices import normalize_audio_device
 from .shortcuts import (
     SHORTCUT_DEFINITIONS,
     default_shortcut_bindings,
@@ -94,6 +94,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "remember_ai_settings": True,
     "clean_temp": True,
     "audio_output_device": None,
+    "audio_input_device": None,
     "confirm_success": False,
     "ai_steps": 32,
     "ai_cfg": 2.0,
@@ -165,7 +166,8 @@ def normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
     for key, default in DEFAULT_CONFIG.items():
         if isinstance(default, bool) and not isinstance(result.get(key), bool):
             result[key] = default
-    result["audio_output_device"] = normalize_output_device(result["audio_output_device"])
+    for key in ("audio_output_device", "audio_input_device"):
+        result[key] = normalize_audio_device(result[key])
 
     result["font_size"] = int(_clamp_number(result.get("font_size"), 10, 8, 24))
     result["ai_steps"] = int(_clamp_number(result.get("ai_steps"), 32, 1, 100))

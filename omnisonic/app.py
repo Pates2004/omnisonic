@@ -15,7 +15,7 @@ from .accelerator import (
     format_diagnostics,
     preferred_dtype,
 )
-from .audio_output import OutputDeviceUnavailableError, list_output_devices, playback_options
+from .audio_devices import AudioDeviceUnavailableError, list_audio_devices, stream_options
 from .config import (
     CONFIG_FILE,
     DEFAULT_CONFIG,
@@ -872,12 +872,8 @@ class SettingsDialog(wx.Dialog):
             self.chk_hide_console.SetValue(self.cfg.get("hide_console", True))
             vbox_sys.Add(self.chk_hide_console, 0, wx.ALL | wx.EXPAND, 5)
 
-            output_label = self._("audio_output_device")
-            vbox_sys.Add(wx.StaticText(tab_sys, label=output_label), 0, wx.LEFT | wx.TOP, 5)
-            self.choice_output_device = wx.Choice(tab_sys)
-            self.choice_output_device.SetName(output_label)
-            self._populate_audio_outputs()
-            vbox_sys.Add(self.choice_output_device, 0, wx.ALL | wx.EXPAND, 5)
+            self.choice_output_device = self._add_audio_device_choice(tab_sys, vbox_sys, "output")
+            self.choice_input_device = self._add_audio_device_choice(tab_sys, vbox_sys, "input")
 
             label = wx.StaticText(tab_sys, label=self._("preset_disp_lbl"))
             vbox_sys.Add(label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 5)
@@ -1232,15 +1228,18 @@ class SettingsDialog(wx.Dialog):
         parent.chk_duration.SetValue(state["use_duration"])
         parent.spin_duration.SetValue(state["duration_val"])
 
-    def _populate_audio_outputs(self):
-        choice = self.choice_output_device
-        choice.Append(self._("audio_output_default"), None)
-        saved = self.cfg.get("audio_output_device")
+    def _add_audio_device_choice(self, parent, sizer, kind):
+        label = self._(f"audio_{kind}_device")
+        sizer.Add(wx.StaticText(parent, label=label), 0, wx.LEFT | wx.TOP, 5)
+        choice = wx.Choice(parent)
+        choice.SetName(label)
+        choice.Append(self._("audio_device_default"), None)
+        saved = self.cfg.get(f"audio_{kind}_device")
         selected = 0
         try:
-            devices = list_output_devices(sd)
+            devices = list_audio_devices(sd, kind)
         except Exception:
-            logging.exception("Could not enumerate audio outputs")
+            logging.exception("Could not enumerate audio %s devices", kind)
             devices = []
         for device in devices:
             index = choice.Append(device.label, device.key)
@@ -1248,13 +1247,16 @@ class SettingsDialog(wx.Dialog):
                 selected = index
         if saved and selected == 0:
             selected = choice.Append(
-                self._("audio_output_missing_item").format(name=saved[1], host=saved[0]), saved
+                self._("audio_device_missing_item").format(name=saved[1], host=saved[0]), saved
             )
         choice.SetSelection(selected)
+        sizer.Add(choice, 0, wx.ALL | wx.EXPAND, 5)
+        return choice
 
-    def _selected_audio_output(self):
-        index = self.choice_output_device.GetSelection()
-        return self.choice_output_device.GetClientData(index) if index != wx.NOT_FOUND else None
+    @staticmethod
+    def _selected_audio_device(choice):
+        index = choice.GetSelection()
+        return choice.GetClientData(index) if index != wx.NOT_FOUND else None
 
     def _collect_settings_state(self):
         state = {
@@ -1269,7 +1271,8 @@ class SettingsDialog(wx.Dialog):
         state.update(
             {
                 "hide_console": self.chk_hide_console.GetValue(),
-                "audio_output_device": self._selected_audio_output(),
+                "audio_output_device": self._selected_audio_device(self.choice_output_device),
+                "audio_input_device": self._selected_audio_device(self.choice_input_device),
                 "preset_display": self.cb_preset_disp.GetSelection(),
                 "asr_model": self.cb_asr.GetValue(),
                 "preload_asr": self.chk_preload_asr.GetValue(),
@@ -1538,6 +1541,7 @@ class SettingsDialog(wx.Dialog):
             self.spin_font.SetValue(defaults["font_size"])
             self.chk_hide_console.SetValue(defaults["hide_console"])
             self.choice_output_device.SetSelection(0)
+            self.choice_input_device.SetSelection(0)
             self.cb_preset_disp.SetSelection(0)
             self.cb_asr.SetValue(defaults["asr_model_name"])
             self.chk_preload_asr.SetValue(defaults["preload_asr"])
@@ -1709,7 +1713,8 @@ class SettingsDialog(wx.Dialog):
                     self.cfg["asr_model_name"] = new_asr
 
             self.cfg["hide_console"] = self.chk_hide_console.GetValue()
-            self.cfg["audio_output_device"] = self._selected_audio_output()
+            self.cfg["audio_output_device"] = self._selected_audio_device(self.choice_output_device)
+            self.cfg["audio_input_device"] = self._selected_audio_device(self.choice_input_device)
             idx = self.cb_preset_disp.GetSelection()
             self.cfg["preset_display_mode"] = (
                 "name" if idx == 0 else ("path" if idx == 1 else "name_path")
@@ -1803,6 +1808,7 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
         self.current_op = None
         self.rec_stream = None
         self.rec_data = []
+        self._recording_input_status = []
         self.rec_fs = None
         self._reference_revision = 0
         self._auto_reference_pending = False
@@ -3864,11 +3870,9 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     def _play_sound_data(self, data, sample_rate):
         try:
             selection = self.cfg.get("audio_output_device")
-            sd.play(data, samplerate=sample_rate, **playback_options(sd, selection))
-        except OutputDeviceUnavailableError:
-            message = self._("audio_output_unavailable").format(
-                name=selection[1], host=selection[0]
-            )
+            sd.play(data, samplerate=sample_rate, **stream_options(sd, selection, "output"))
+        except AudioDeviceUnavailableError as exc:
+            message = self._("audio_output_unavailable").format(name=exc.name, host=exc.host)
         except Exception as exc:
             message = self._("err_playback").format(e=str(exc))
         else:
@@ -4181,17 +4185,23 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
     def _CloseRecording(self):
         stream = getattr(self, "rec_stream", None)
         self.rec_stream = None
-        if stream is not None:
+        input_status = getattr(self, "_recording_input_status", ())
+        self._recording_input_status = []
+        if stream is None:
+            return
+        try:
+            stream.stop(ignore_errors=False)
+        except BaseException:
             try:
-                stream.stop(ignore_errors=False)
-            except BaseException:
-                try:
-                    stream.close(ignore_errors=False)
-                except Exception as exc:
-                    logging.warning("Could not close failed recording stream: %s", exc)
-                raise
-            else:
                 stream.close(ignore_errors=False)
+            except Exception as exc:
+                logging.warning("Could not close failed recording stream: %s", exc)
+            raise
+        else:
+            stream.close(ignore_errors=False)
+        finally:
+            if input_status:
+                logging.warning("Audio input status: %s", input_status[0])
 
     def _UpdateRecordingControls(self, button):
         if getattr(self, "rec_stream", None) is not None:
@@ -4284,14 +4294,18 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 self._SaveRecording(path_ctrl, force_dialog=True)
             elif getattr(self, "rec_stream", None) is None:
                 self.rec_data = []
+                self._recording_input_status = []
                 chunks = self.rec_data
+                input_status = self._recording_input_status
 
                 def callback(indata, frames, time_info, status):
-                    if status:
-                        logging.warning("Audio input status: %s", status)
+                    # Logging may block; report the first warning after capture.
+                    if status and not input_status:
+                        input_status.append(status)
                     chunks.append(indata.copy())
 
-                self.rec_stream = sd.InputStream(channels=1, callback=callback)
+                options = stream_options(sd, self.cfg.get("audio_input_device"), "input")
+                self.rec_stream = sd.InputStream(channels=1, callback=callback, **options)
                 self.rec_fs = int(round(float(self.rec_stream.samplerate)))
                 if self.rec_fs <= 0:
                     raise ValueError(self._("record_invalid_sample_rate"))
@@ -4306,8 +4320,13 @@ class OmniVoiceFrame(BatchTabMixin, wx.Frame):
                 except Exception:
                     logging.exception("Could not close failed recording stream")
             message = "record_failed_kept" if self.rec_data else "record_failed"
+            error = (
+                self._("audio_input_unavailable").format(name=exc.name, host=exc.host)
+                if isinstance(exc, AudioDeviceUnavailableError)
+                else validation_error_message(exc, self._)
+            )
             wx.MessageBox(
-                self._(message).format(error=validation_error_message(exc, self._)),
+                self._(message).format(error=error),
                 self._("error_title"),
                 wx.OK | wx.ICON_ERROR,
             )

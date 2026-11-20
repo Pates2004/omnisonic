@@ -6,11 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
-from omnisonic.audio_output import (
+from omnisonic.audio_devices import (
     WASAPI,
-    OutputDeviceUnavailableError,
-    list_output_devices,
-    playback_options,
+    AudioDeviceUnavailableError,
+    list_audio_devices,
+    stream_options,
 )
 from omnisonic.config import normalize_config
 from omnisonic.validation import normalize_pasted_path
@@ -39,8 +39,8 @@ class PlaybackTests(unittest.TestCase):
             "wx": self.wx,
             "normalize_pasted_path": normalize_pasted_path,
             "sd": self.sounddevice,
-            "playback_options": playback_options,
-            "OutputDeviceUnavailableError": OutputDeviceUnavailableError,
+            "stream_options": stream_options,
+            "AudioDeviceUnavailableError": AudioDeviceUnavailableError,
             "os": SimpleNamespace(path=SimpleNamespace(exists=lambda path: True)),
             "load_waveform": lambda path: (waveform, 100),
         }
@@ -140,10 +140,12 @@ class PlaybackTests(unittest.TestCase):
             dict(index=3, hostapi=0, name="Headphones", max_output_channels=2),
             dict(index=4, hostapi=1, name="Headphones", max_output_channels=2),
         ]
-        self.assertEqual([item.index for item in list_output_devices(self.sounddevice)], [3, 4])
-        with self.assertRaises(OutputDeviceUnavailableError):
-            playback_options(self.sounddevice, [WASAPI, "Duplicate"])
-        self.assertEqual(playback_options(self.sounddevice, ["MME", "Headphones"]), {"device": 4})
+        self.assertEqual([d.index for d in list_audio_devices(self.sounddevice, "output")], [3, 4])
+        with self.assertRaises(AudioDeviceUnavailableError):
+            stream_options(self.sounddevice, [WASAPI, "Duplicate"], "output")
+        self.assertEqual(
+            stream_options(self.sounddevice, ["MME", "Headphones"], "output"), {"device": 4}
+        )
 
     def test_output_identity_round_trips_and_numeric_indexes_are_not_trusted(self):
         self.assertEqual(

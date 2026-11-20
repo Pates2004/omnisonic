@@ -324,6 +324,17 @@ nowego wyboru zatrzymuje bieżący odsłuch; następne odtworzenie użyje nowego
 wyjścia. Brak zapisanej karty wyświetli błąd. Jeśli nowa karta nie pojawia się
 na liście, uruchom program ponownie.
 
+**Settings > System > Microphone / recording input** independently selects the
+microphone or virtual input for reference recordings. The saved choice applies
+to the next recording; it does not change playback or the system defaults.
+An unavailable saved input is reported without recording from another device.
+**System default** retains the original default input behavior.
+
+Po polsku: **Ustawienia > System > Mikrofon / urządzenie wejściowe** wybiera
+mikrofon albo wejście wirtualne do nagrywania wzorca. Zmiana działa od następnego
+nagrania i nie zmienia odsłuchu ani ustawień Windows. Jeśli wybrane wejście
+jest niedostępne, program wyświetla błąd zamiast nagrywać z innego urządzenia.
+
 Generated audio and microphone exports use the first free filename, e.g.
 `generated.wav`, `generated1.wav`, `generated2.wav` or `record.wav`,
 `record1.wav`. Save As recomputes the suggested name in the folder actually
@@ -742,8 +753,9 @@ options, error reporting, PCM clipping and long-reference Whisper calls without
 loading model weights. These regressions also run in CI.
 
 `tests/test_inference_validation.py` covers malformed presets and decoded audio;
-`tests/test_playback.py` covers pause/resume timing independently of the system
-clock. `tests/test_ui_preferences.py` covers shortcut capture and localized input
+`tests/test_playback.py` covers output routing and pause/resume timing, and
+`tests/test_file_safety.py` covers microphone routing and recording recovery
+without capturing live audio. `tests/test_ui_preferences.py` covers shortcut capture and localized input
 validation. Optional `python -m tests.smoke_frame_lifecycle` and
 `python -m tests.smoke_dialog_lifecycle` exercise actual wx modal/timer lifecycles
 without loading a model or altering user settings.
